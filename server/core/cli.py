@@ -20,7 +20,7 @@ from server.core.graph_service import (
 )
 
 
-def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
+def build_parser():
     """执行 CLI 命令并返回结果字典。
 
     Args:
@@ -275,8 +275,16 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
         "--eid", type=int, required=True, help="要删除的边 ID"
     )
 
+    return parser
+
+
+_PARSER = build_parser()
+
+
+def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
+
     try:
-        args = parser.parse_args(args_list)
+        args = _PARSER.parse_args(args_list)
     except SystemExit:
         return {"status": "error", "message": "Invalid command or arguments"}
 
@@ -393,24 +401,10 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
     elif args.command == "delete":
         # 删除操作的登录验证由服务器端处理
         if args.delete_type == "vertex":
-            # 验证输入
-            if not isinstance(args.vid, int) or args.vid <= 0:
-                return {
-                    "status": "error",
-                    "message": "Vertex ID must be a positive integer",
-                }
-
             result = delete_vertex(vid=args.vid)
             return result
 
         elif args.delete_type == "edge":
-            # 验证输入
-            if not isinstance(args.eid, int) or args.eid <= 0:
-                return {
-                    "status": "error",
-                    "message": "Edge ID must be a positive integer",
-                }
-
             result = delete_edge(eid=args.eid)
             return result
     else:
