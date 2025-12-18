@@ -19,7 +19,7 @@ def get_vertex_table_ddl() -> str:
     return """
     CREATE TABLE IF NOT EXISTS vertex (
         vid       BIGINT PRIMARY KEY,
-        v_type    SMALLINT NOT NULL,
+        v_type    VARCHAR(256)NOT NULL,
         create_time BIGINT NOT NULL,
         balance   BIGINT NOT NULL
     ) WITH (ORIENTATION = ROW);
@@ -35,7 +35,7 @@ def get_edge_table_ddl() -> str:
         dst_vid    BIGINT NOT NULL,
         amount     BIGINT NOT NULL,
         occur_time BIGINT NOT NULL,
-        e_type     SMALLINT NOT NULL
+        e_type     VARCHAR(256) NOT NULL
     ) WITH (ORIENTATION = ROW);
     """
 

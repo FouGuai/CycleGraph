@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import psycopg2
 
-from connection import connect
+from server.opengauss.connection import connect
 
 
 # ==================== 数据类定义 ====================
@@ -16,7 +16,7 @@ from connection import connect
 class Vertex:
     """点数据类"""
     vid: int
-    v_type: int
+    v_type: str
     create_time: int
     balance: int
     
@@ -43,7 +43,7 @@ class Edge:
     dst_vid: int
     amount: int
     occur_time: int
-    e_type: int
+    e_type: str
     
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -260,11 +260,11 @@ if __name__ == "__main__":
     
     print("\n=== 测试数据类 ===")
     # 测试 Vertex
-    v = Vertex(vid=1, v_type=1, create_time=1234567890, balance=10000)
+    v = Vertex(vid=1, v_type="test_g_types", create_time=1234567890, balance=10000)
     print(f"Vertex: {v.to_dict()}")
     
     # 测试 Edge
-    e = Edge(eid=1, src_vid=1, dst_vid=2, amount=5000, occur_time=1234567890, e_type=0)
+    e = Edge(eid=1, src_vid=1, dst_vid=2, amount=5000, occur_time=1234567890, e_type="teset_e_type")
     print(f"Edge: {e.to_dict()}")
     
     # 测试 User

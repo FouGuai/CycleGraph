@@ -6,9 +6,9 @@
 import argparse
 import json
 import sys
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
-from session import Session
+from interface.session import Session
 from server.core.auth_service import register_user, login_user
 from server.core.graph_service import (
     query_vertices,
@@ -18,12 +18,15 @@ from server.core.graph_service import (
 )
 
 
-def print_json(data: dict) -> None:
-    """格式化打印 JSON 数据。"""
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-
-
-def main():
+def execute_command(args_list: List[str]) -> Dict[str, Any]:
+    """执行 CLI 命令并返回结果字典。
+    
+    Args:
+        args_list: 命令参数列表,例如 ['register', '--username', 'alice', '--password', 'pass123']
+        
+    Returns:
+        Dict: 执行结果的字典
+    """
     parser = argparse.ArgumentParser(
         prog='cgql',
         description='CycleGraph Query Language - 图数据库命令行工具'
@@ -108,7 +111,10 @@ def main():
     parser_insert_edge.add_argument('--e-type', type=int, default=0, help='边类型')
     parser_insert_edge.add_argument('--create-vertices', action='store_true', help='自动创建不存在的点')
     
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args(args_list)
+    except SystemExit:
+        return {"status": "error", "message": "Invalid command or arguments"}
     
     # 初始化会话
     session = Session()
@@ -116,39 +122,41 @@ def main():
     # 处理命令
     if args.command == 'register':
         result = register_user(args.username, args.password)
-        print_json(result)
+        return result
     
     elif args.command == 'login':
         result = login_user(args.username, args.password)
         if result['status'] == 'success':
             session.set_token(result['token'], result['username'])
-        print_json({"status": result['status']})
+        return {"status": result['status'], "message": result.get('message', '')}
     
     elif args.command == 'logout':
         session.clear()
-        print("Logged out and session cleared.")
+        return {"status": "success", "message": "Logged out and session cleared."}
     
     elif args.command == 'whoami':
         if session.is_logged_in():
-            print_json({
+            return {
                 "status": "success",
                 "found": True,
                 "current_user": session.get_username()
-            })
+            }
         else:
-            print_json({
+            return {
                 "status": "error",
                 "message": "Not logged in"
-            })
+            }
     
     elif args.command == 'connect':
         session.set_host(args.host)
-        print(f"Successfully connected to {args.host}. Session configuration saved.")
+        return {
+            "status": "success",
+            "message": f"Successfully connected to {args.host}. Session configuration saved."
+        }
     
     elif args.command == 'query':
         if not session.is_logged_in():
-            print_json({"status": "error", "message": "Please login first"})
-            sys.exit(1)
+            return {"status": "error", "message": "Please login first"}
         
         if args.query_type == 'vertex':
             result = query_vertices(
@@ -159,7 +167,7 @@ def main():
                 min_balance=args.min_balance,
                 max_balance=args.max_balance
             )
-            print_json(result)
+            return result
         
         elif args.query_type == 'edge':
             result = query_edges(
@@ -172,18 +180,17 @@ def main():
                 min_occur_time=args.min_occur_time,
                 max_occur_time=args.max_occur_time
             )
-            print_json(result)
+            return result
         
         elif args.query_type == 'cycle':
-            print_json({
+            return {
                 "status": "error",
                 "message": "Cycle query not implemented yet"
-            })
+            }
     
     elif args.command == 'insert':
         if not session.is_logged_in():
-            print_json({"status": "error", "message": "Please login first"})
-            sys.exit(1)
+            return {"status": "error", "message": "Please login first"}
         
         if args.insert_type == 'vertex':
             result = insert_vertex(
@@ -192,7 +199,7 @@ def main():
                 create_time=args.create_time,
                 balance=args.balance
             )
-            print_json(result)
+            return result
         
         elif args.insert_type == 'edge':
             result = insert_edge(
@@ -204,10 +211,30 @@ def main():
                 e_type=args.e_type,
                 create_vertices=args.create_vertices
             )
-            print_json(result)
+            return result
     
     else:
-        parser.print_help()
+        return {"status": "error", "message": "Unknown command"}
+
+
+def execute_command_from_string(command_str: str) -> str:
+    """从命令字符串执行并返回 JSON 字符串。
+    
+    Args:
+        command_str: 命令字符串,例如 "register --username alice --password pass123"
+        
+    Returns:
+        str: JSON 格式的结果字符串
+    """
+    args_list = command_str.split()
+    result = execute_command(args_list)
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+def main():
+    """命令行入口函数,用于直接从终端调用。"""
+    result = execute_command(sys.argv[1:])
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == '__main__':
