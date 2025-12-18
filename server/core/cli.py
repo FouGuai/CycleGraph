@@ -16,6 +16,7 @@ from server.core.graph_service import (
     insert_edge,
     query_cycles,
     delete_vertex,
+    delete_edge,
 )
 
 
@@ -38,8 +39,8 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
 
     # register
     parser_register = subparsers.add_parser("register", help="注册新用户")
-    parser_register.add_argument("--username", required=True, help="用户名")
-    parser_register.add_argument("--password", required=True, help="密码")
+    parser_register.add_argument("--username", "-u", required=True, help="用户名")
+    parser_register.add_argument("--password", "-p", required=True, help="密码")
 
     # login
     parser_login = subparsers.add_parser("login", help="用户登录")
@@ -60,11 +61,13 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
 
     # ==================== 查询命令 ====================
 
-    parser_query = subparsers.add_parser("query", help="查询数据")
+    parser_query = subparsers.add_parser("query", aliases=["q"], help="查询数据")
     query_subparsers = parser_query.add_subparsers(dest="query_type", help="查询类型")
 
     # query vertex
-    parser_query_vertex = query_subparsers.add_parser("vertex", help="查询点")
+    parser_query_vertex = query_subparsers.add_parser(
+        "vertex", aliases=["v"], help="查询点"
+    )
     parser_query_vertex.add_argument("--vid", type=int, help="点 ID")
     parser_query_vertex.add_argument(
         "--vt", "--v-type", type=str, nargs="+", dest="v_type", help="点类型"
@@ -79,7 +82,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
     )
 
     # query edge
-    parser_query_edge = query_subparsers.add_parser("edge", help="查询边")
+    parser_query_edge = query_subparsers.add_parser(
+        "edge", aliases=["e"], help="查询边"
+    )
     parser_query_edge.add_argument("--eid", type=int, help="边 ID")
     parser_query_edge.add_argument(
         "--src", "--src-vid", type=int, dest="src_vid", help="源点 ID"
@@ -104,7 +109,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
     )
 
     # query cycle
-    parser_query_cycle = query_subparsers.add_parser("cycle", help="查询环路")
+    parser_query_cycle = query_subparsers.add_parser(
+        "cycle", aliases=["c"], help="查询环路"
+    )
     parser_query_cycle.add_argument(
         "--start",
         "--start-vid",
@@ -189,13 +196,15 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
 
     # ==================== 插入命令 ====================
 
-    parser_insert = subparsers.add_parser("insert", help="插入数据")
+    parser_insert = subparsers.add_parser("insert", aliases=["i"], help="插入数据")
     insert_subparsers = parser_insert.add_subparsers(
         dest="insert_type", help="插入类型"
     )
 
     # insert vertex
-    parser_insert_vertex = insert_subparsers.add_parser("vertex", help="插入点")
+    parser_insert_vertex = insert_subparsers.add_parser(
+        "vertex", aliases=["v"], help="插入点"
+    )
     parser_insert_vertex.add_argument(
         "--vt", "--v-type", type=str, required=True, dest="v_type", help="点类型"
     )
@@ -214,7 +223,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
     )
 
     # insert edge
-    parser_insert_edge = insert_subparsers.add_parser("edge", help="插入边")
+    parser_insert_edge = insert_subparsers.add_parser(
+        "edge", aliases=["e"], help="插入边"
+    )
     parser_insert_edge.add_argument("--eid", type=int, required=True, help="边 ID")
     parser_insert_edge.add_argument(
         "--src", "--src-vid", type=int, required=True, dest="src_vid", help="源点 ID"
@@ -243,19 +254,23 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
         help="自动创建不存在的点",
     )
 
-    parser_delete = subparsers.add_parser("delete", help="删除数据")
+    parser_delete = subparsers.add_parser("delete", aliases=["d"], help="删除数据")
     delete_subparsers = parser_delete.add_subparsers(
         dest="delete_type", help="删除类型"
     )
 
     # delete vertex
-    parser_delete_vertex = delete_subparsers.add_parser("vertex", help="删除点")
+    parser_delete_vertex = delete_subparsers.add_parser(
+        "vertex", aliases=["v"], help="删除点"
+    )
     parser_delete_vertex.add_argument(
         "--vid", type=int, required=True, help="要删除的点 ID"
     )
 
     # delete edge
-    parser_delete_edge = delete_subparsers.add_parser("edge", help="删除边")
+    parser_delete_edge = delete_subparsers.add_parser(
+        "edge", aliases=["e"], help="删除边"
+    )
     parser_delete_edge.add_argument(
         "--eid", type=int, required=True, help="要删除的边 ID"
     )
@@ -292,9 +307,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             "message": f"Successfully connected to {args.host}. Session configuration saved.",
         }
 
-    elif args.command == "query" or args.command == "q":
+    elif args.command == "query":
         # 查询操作的登录验证由服务器端处理
-        if args.query_type == "vertex" or args.query_type == "v":
+        if args.query_type == "vertex":
             result = query_vertices(
                 vid=args.vid,
                 v_types=args.v_type,
@@ -305,7 +320,7 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             )
             return result
 
-        elif args.query_type == "edge" or args.query_type == "e":
+        elif args.query_type == "edge":
             result = query_edges(
                 eid=args.eid,
                 src_vid=args.src_vid,
@@ -318,7 +333,7 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             )
             return result
 
-        elif args.query_type == "cycle" or args.query_type == "c":
+        elif args.query_type == "cycle":
             # 构建过滤参数
             kwargs = {
                 "start_vid": args.start_vid,
@@ -352,9 +367,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             result = query_cycles(**kwargs)
             return result
 
-    elif args.command == "insert" or args.command == "i":
+    elif args.command == "insert":
         # 插入操作的登录验证由服务器端处理
-        if args.insert_type == "vertex" or args.insert_type == "v":
+        if args.insert_type == "vertex":
 
             result = insert_vertex(
                 v_type=args.v_type,
@@ -364,7 +379,7 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             )
             return result
 
-        elif args.insert_type == "edge" or args.insert_type == "e":
+        elif args.insert_type == "edge":
             result = insert_edge(
                 eid=args.eid,
                 src_vid=args.src_vid,
@@ -375,9 +390,9 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
                 create_vertices=args.create_vertices,
             )
             return result
-    elif args.command == "delete" or args.command == "d":
+    elif args.command == "delete":
         # 删除操作的登录验证由服务器端处理
-        if args.delete_type == "vertex" or args.delete_type == "v":
+        if args.delete_type == "vertex":
             # 验证输入
             if not isinstance(args.vid, int) or args.vid <= 0:
                 return {
@@ -388,7 +403,7 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
             result = delete_vertex(vid=args.vid)
             return result
 
-        elif args.delete_type == "edge" or args.delete_type == "e":
+        elif args.delete_type == "edge":
             # 验证输入
             if not isinstance(args.eid, int) or args.eid <= 0:
                 return {

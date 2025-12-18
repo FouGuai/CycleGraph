@@ -49,7 +49,8 @@ def get_user_table_ddl() -> str:
         username      VARCHAR(64) UNIQUE NOT NULL,
         password_hash VARCHAR(256) NOT NULL,
         created_at    BIGINT NOT NULL,
-        last_login    BIGINT
+        last_login    BIGINT,
+        token         VARCHAR(256) UNIQUE
     ) WITH (ORIENTATION = ROW);
     """
 

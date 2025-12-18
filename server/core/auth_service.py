@@ -88,28 +88,63 @@ def login_user(username: str, password: str, **db_kwargs: Any) -> Dict[str, Any]
         if user.password_hash != hash_password(password):
             return {"status": "error", "message": "Wrong username or password"}
 
-        # 更新最后登录时间
+        # 生成令牌
+        token = generate_token()
+
+        # 更新最后登录时间和token
         execute_dml(
-            "UPDATE users SET last_login = %s WHERE user_id = %s",
-            (int(time.time()), user.user_id),
+            "UPDATE users SET last_login = %s, token = %s WHERE user_id = %s",
+            (int(time.time()), token, user.user_id),
             **db_kwargs,
         )
 
-        # 生成令牌（实际应用中应存储到 token 表）
-        token = generate_token()
-
-        return {"status": "success", "token": token, "username": user.username}
+        result = {"status": "success", "token": token, "username": user.username}
+        return result
 
     except Exception as e:
         return {"status": "error", "message": f"Login failed: {e}"}
 
 
-def verify_token(token: str) -> bool:
-    """验证令牌是否有效（简化版本）。
+def verify_token(token: str, **db_kwargs: Any) -> Optional[str]:
+    """验证令牌是否有效,并返回用户名。
 
-    实际应用中应该：
-    1. 将 token 存储到数据库的 tokens 表
-    2. 验证时查询数据库并检查过期时间
+    Args:
+        token: 访问令牌
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        Optional[str]: 如果token有效返回用户名,否则返回None
     """
-    # 简化版本：只要不为空就认为有效
-    return bool(token)
+    if not token:
+        return None
+
+    try:
+        result = fetch_one(
+            "SELECT username FROM users WHERE token = %s",
+            (token,),
+            **db_kwargs,
+        )
+        return result[0] if result else None
+    except Exception:
+        return None
+
+
+def clear_token(token: str, **db_kwargs: Any) -> bool:
+    """清除用户的token（登出时调用）。
+
+    Args:
+        token: 要清除的令牌
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        bool: 清除成功返回True
+    """
+    try:
+        execute_dml(
+            "UPDATE users SET token = NULL WHERE token = %s",
+            (token,),
+            **db_kwargs,
+        )
+        return True
+    except Exception:
+        return False

@@ -7,7 +7,7 @@ import time
 from typing import List, Dict, Any, Optional
 from server.opengauss.graph_dao import execute_dml, fetch_all, fetch_one, Vertex, Edge
 
-import server.algo.bibfs as cycle_ag
+import server.core.bibfs as cycle_ag
 
 
 # ==================== Vertex 操作 ====================
@@ -71,7 +71,7 @@ def query_vertices(
 
 
 def insert_vertex(
-    v_type: int,
+    v_type: str,
     vid: Optional[int] = None,
     create_time: Optional[int] = None,
     balance: int = 0,
@@ -79,6 +79,33 @@ def insert_vertex(
 ) -> Dict[str, Any]:
     """插入点。"""
     try:
+        # 验证输入
+        if not v_type or (isinstance(v_type, str) and not v_type.strip()):
+            return {"status": "error", "message": "Vertex type cannot be empty"}
+
+        if vid is not None:
+            if not isinstance(vid, int) or vid <= 0:
+                return {
+                    "status": "error",
+                    "message": "Vertex ID must be a positive integer",
+                }
+
+            # 检查ID是否已存在
+            existing = fetch_one(
+                "SELECT 1 FROM vertex WHERE vid = %s", (vid,), **db_kwargs
+            )
+            if existing:
+                return {"status": "error", "message": f"Vertex {vid} already exists"}
+
+        if balance < 0:
+            return {"status": "error", "message": "Balance must be non-negative"}
+
+        if create_time is not None and create_time <= 0:
+            return {
+                "status": "error",
+                "message": "Create time must be a positive integer",
+            }
+
         # 如果未指定 vid，生成一个
         if vid is None:
             # 获取当前最大 vid
@@ -109,6 +136,10 @@ def insert_vertex(
         }
 
     except Exception as e:
+        # 检查是否是重复键错误
+        error_msg = str(e).lower()
+        if "duplicate" in error_msg or "unique" in error_msg:
+            return {"status": "error", "message": f"Vertex {vid} already exists"}
         return {"status": "error", "message": f"Insert vertex failed: {e}"}
 
 
@@ -194,6 +225,41 @@ def insert_edge(
 ) -> Dict[str, Any]:
     """插入边。"""
     try:
+        # 验证输入
+        if not isinstance(eid, int) or eid <= 0:
+            return {"status": "error", "message": "Edge ID must be a positive integer"}
+
+        if not isinstance(src_vid, int) or src_vid <= 0:
+            return {
+                "status": "error",
+                "message": "Source vertex ID must be a positive integer",
+            }
+
+        if not isinstance(dst_vid, int) or dst_vid <= 0:
+            return {
+                "status": "error",
+                "message": "Destination vertex ID must be a positive integer",
+            }
+
+        if not isinstance(amount, int) or amount <= 0:
+            return {"status": "error", "message": "Amount must be a positive integer"}
+
+        if occur_time is not None and occur_time <= 0:
+            return {
+                "status": "error",
+                "message": "Occur time must be a positive integer",
+            }
+
+        if not e_type or (isinstance(e_type, str) and not e_type.strip()):
+            return {"status": "error", "message": "Edge type cannot be empty"}
+
+        # 检查边ID是否已存在
+        existing_edge = fetch_one(
+            "SELECT 1 FROM edge WHERE eid = %s", (eid,), **db_kwargs
+        )
+        if existing_edge:
+            return {"status": "error", "message": f"Edge {eid} already exists"}
+
         # 如果未指定发生时间，使用当前时间
         if occur_time is None:
             occur_time = int(time.time())
@@ -205,14 +271,33 @@ def insert_edge(
                 "SELECT 1 FROM vertex WHERE vid = %s", (src_vid,), **db_kwargs
             )
             if not src_exists:
-                insert_vertex(v_type=0, vid=src_vid, **db_kwargs)
+                insert_vertex(v_type="auto", vid=src_vid, **db_kwargs)
 
             # 检查目标点是否存在
             dst_exists = fetch_one(
                 "SELECT 1 FROM vertex WHERE vid = %s", (dst_vid,), **db_kwargs
             )
             if not dst_exists:
-                insert_vertex(v_type=0, vid=dst_vid, **db_kwargs)
+                insert_vertex(v_type="auto", vid=dst_vid, **db_kwargs)
+        else:
+            # 验证点是否存在
+            src_exists = fetch_one(
+                "SELECT 1 FROM vertex WHERE vid = %s", (src_vid,), **db_kwargs
+            )
+            if not src_exists:
+                return {
+                    "status": "error",
+                    "message": f"Source vertex {src_vid} does not exist",
+                }
+
+            dst_exists = fetch_one(
+                "SELECT 1 FROM vertex WHERE vid = %s", (dst_vid,), **db_kwargs
+            )
+            if not dst_exists:
+                return {
+                    "status": "error",
+                    "message": f"Destination vertex {dst_vid} does not exist",
+                }
 
         # 插入边
         execute_dml(
@@ -235,6 +320,15 @@ def insert_edge(
         }
 
     except Exception as e:
+        # 检查是否是重复键错误
+        error_msg = str(e).lower()
+        if "duplicate" in error_msg or "unique" in error_msg:
+            return {"status": "error", "message": f"Edge {eid} already exists"}
+        if "foreign key" in error_msg or "violates" in error_msg:
+            return {
+                "status": "error",
+                "message": "Source or destination vertex does not exist",
+            }
         return {"status": "error", "message": f"Insert edge failed: {e}"}
 
 
@@ -251,6 +345,60 @@ def query_cycles(
     allow_duplicate_vertices: bool = False,
     allow_duplicate_edges: bool = False,
 ) -> Dict[str, Any]:
+    """查询环路。"""
+    # 验证输入
+    if not isinstance(start_vid, int) or start_vid <= 0:
+        return {
+            "status": "error",
+            "message": "Start vertex ID must be a positive integer",
+        }
+
+    if not isinstance(max_depth, int) or max_depth <= 0:
+        return {"status": "error", "message": "Max depth must be a positive integer"}
+
+    if max_depth > 20:
+        return {
+            "status": "error",
+            "message": "Max depth cannot exceed 20 for performance reasons",
+        }
+
+    if direction not in ["forward", "any"]:
+        return {"status": "error", "message": "Direction must be 'forward' or 'any'"}
+
+    if vertex_filter_min_balance is not None and vertex_filter_min_balance < 0:
+        return {
+            "status": "error",
+            "message": "Vertex minimum balance must be non-negative",
+        }
+
+    if edge_filter_min_amount is not None and edge_filter_min_amount < 0:
+        return {
+            "status": "error",
+            "message": "Edge minimum amount must be non-negative",
+        }
+
+    if edge_filter_max_amount is not None and edge_filter_max_amount < 0:
+        return {
+            "status": "error",
+            "message": "Edge maximum amount must be non-negative",
+        }
+
+    if edge_filter_min_amount is not None and edge_filter_max_amount is not None:
+        if edge_filter_min_amount > edge_filter_max_amount:
+            return {
+                "status": "error",
+                "message": "Edge minimum amount cannot be greater than maximum amount",
+            }
+
+    if limit <= 0:
+        return {"status": "error", "message": "Limit must be a positive integer"}
+
+    if limit > 1000:
+        return {
+            "status": "error",
+            "message": "Limit cannot exceed 1000 for performance reasons",
+        }
+
     return cycle_ag.query_cycles(
         start_vid,
         max_depth,
@@ -264,3 +412,93 @@ def query_cycles(
         allow_duplicate_vertices,
         allow_duplicate_edges,
     )
+
+
+# 在文件末尾添加删除函数
+def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
+    """删除点及其相关的所有边。
+
+    Args:
+        vid: 要删除的点ID
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        Dict: 删除结果
+    """
+    try:
+        # 验证输入
+        if not isinstance(vid, int) or vid <= 0:
+            return {
+                "status": "error",
+                "message": "Vertex ID must be a positive integer",
+            }
+
+        # 检查点是否存在
+        existing = fetch_one("SELECT 1 FROM vertex WHERE vid = %s", (vid,), **db_kwargs)
+        if not existing:
+            return {"status": "error", "message": f"Vertex {vid} does not exist"}
+
+        # 统计相关边的数量
+        edge_count_result = fetch_one(
+            "SELECT COUNT(*) FROM edge WHERE src_vid = %s OR dst_vid = %s",
+            (vid, vid),
+            **db_kwargs,
+        )
+        edges_deleted = edge_count_result[0] if edge_count_result else 0
+
+        # 删除相关的边（作为源点或目标点）
+        execute_dml(
+            "DELETE FROM edge WHERE src_vid = %s OR dst_vid = %s",
+            (vid, vid),
+            **db_kwargs,
+        )
+
+        # 删除点
+        execute_dml("DELETE FROM vertex WHERE vid = %s", (vid,), **db_kwargs)
+
+        return {
+            "status": "success",
+            "message": f"Vertex {vid} deleted successfully. {edges_deleted} related edges also deleted.",
+            "data": {"vid": vid, "edges_deleted": edges_deleted},
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Delete vertex failed: {e}"}
+
+
+def delete_edge(eid: int, **db_kwargs: Any) -> Dict[str, Any]:
+    """删除边。
+
+    Args:
+        eid: 要删除的边ID
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        Dict: 删除结果
+    """
+    try:
+        # 验证输入
+        if not isinstance(eid, int) or eid <= 0:
+            return {"status": "error", "message": "Edge ID must be a positive integer"}
+
+        # 检查边是否存在
+        existing = fetch_one("SELECT 1 FROM edge WHERE eid = %s", (eid,), **db_kwargs)
+        if not existing:
+            return {"status": "error", "message": f"Edge {eid} does not exist"}
+
+        # 删除边
+        rows_affected = execute_dml(
+            "DELETE FROM edge WHERE eid = %s", (eid,), **db_kwargs
+        )
+
+        if rows_affected > 0:
+            return {
+                "status": "success",
+                "message": f"Edge {eid} deleted successfully.",
+                "data": {"eid": eid},
+            }
+        else:
+            return {"status": "error", "message": f"Edge {eid} does not exist"}
+
+    except Exception as e:
+        return {"status": "error", "message": f"Delete edge failed: {e}"}

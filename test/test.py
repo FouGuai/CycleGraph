@@ -10,7 +10,7 @@ import os
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from interface.cli import execute_command
+from server.core.cli import execute_command
 
 
 def run_command(args_list: list) -> dict:
@@ -90,7 +90,7 @@ def test_vertex_operations():
 
     # 1. 插入点（自动生成 ID）
     print("\n[3.1] 插入点（自动生成 ID）")
-    result = run_command(["insert", "vertex", "--v-type", "1", "--balance", "10000"])
+    result = run_command(["insert", "vertex", "--vt", "1", "--bal", "10000"])
     assert result.get("status") == "success", "插入点失败"
     auto_vid = result["data"]["vid"]
     print(f"生成的 vid: {auto_vid}")
@@ -102,11 +102,11 @@ def test_vertex_operations():
         [
             "insert",
             "vertex",
-            "--v-type",
+            "--vt",
             "vvvtype",
             "--vid",
             str(test_vid),
-            "--balance",
+            "--bal",
             "50000",
         ]
     )
@@ -131,7 +131,7 @@ def test_vertex_operations():
     # 6. 按余额范围查询
     print("\n[3.6] 按余额范围查询")
     result = run_command(
-        ["query", "vertex", "--min-balance", "40000", "--max-balance", "60000"]
+        ["query", "vertex", "--min-bal", "40000", "--max-bal", "60000"]
     )
     assert result.get("status") == "success", "按余额查询失败"
 
@@ -154,13 +154,13 @@ def test_edge_operations(vid1: int, vid2: int):
             "edge",
             "--eid",
             str(test_eid),
-            "--src-vid",
+            "--src",
             str(vid1),
-            "--dst-vid",
+            "--dst",
             str(vid2),
-            "--amount",
+            "--amt",
             "5000",
-            "--e-type",
+            "--et",
             "0",
         ]
     )
@@ -177,13 +177,13 @@ def test_edge_operations(vid1: int, vid2: int):
             "edge",
             "--eid",
             str(new_eid),
-            "--src-vid",
+            "--src",
             str(new_src),
-            "--dst-vid",
+            "--dst",
             str(new_dst),
-            "--amount",
+            "--amt",
             "3000",
-            "--create-vertices",
+            "--create-v",
         ]
     )
     assert result.get("status") == "success", "插入边（自动创建点）失败"
@@ -201,14 +201,12 @@ def test_edge_operations(vid1: int, vid2: int):
 
     # 5. 按 src-vid 查询
     print("\n[4.5] 按 src-vid 查询")
-    result = run_command(["query", "edge", "--src-vid", str(vid1)])
+    result = run_command(["query", "edge", "--src", str(vid1)])
     assert result.get("status") == "success", "按源点查询失败"
 
     # 6. 按金额范围查询
     print("\n[4.6] 按金额范围查询")
-    result = run_command(
-        ["query", "edge", "--min-amount", "4000", "--max-amount", "6000"]
-    )
+    result = run_command(["query", "edge", "--min-amt", "4000", "--max-amt", "6000"])
     assert result.get("status") == "success", "按金额查询失败"
 
     print("\n✓ 边操作测试通过")
@@ -256,9 +254,9 @@ def test_cycle_operations():
             "vertex",
             "--vid",
             str(v1),
-            "--v-type",
+            "--vt",
             "cycle_test",
-            "--balance",
+            "--bal",
             "50000",
         ]
     )
@@ -268,9 +266,9 @@ def test_cycle_operations():
             "vertex",
             "--vid",
             str(v2),
-            "--v-type",
+            "--vt",
             "cycle_test",
-            "--balance",
+            "--bal",
             "60000",
         ]
     )
@@ -280,9 +278,9 @@ def test_cycle_operations():
             "vertex",
             "--vid",
             str(v3),
-            "--v-type",
+            "--vt",
             "cycle_test",
-            "--balance",
+            "--bal",
             "70000",
         ]
     )
@@ -302,15 +300,15 @@ def test_cycle_operations():
             "edge",
             "--eid",
             str(e1),
-            "--src-vid",
+            "--src",
             str(v1),
-            "--dst-vid",
+            "--dst",
             str(v2),
-            "--amount",
+            "--amt",
             "10000",
-            "--occur-time",
+            "--time",
             str(base_time),
-            "--e-type",
+            "--et",
             "transfer",
         ]
     )
@@ -321,15 +319,15 @@ def test_cycle_operations():
             "edge",
             "--eid",
             str(e2),
-            "--src-vid",
+            "--src",
             str(v2),
-            "--dst-vid",
+            "--dst",
             str(v3),
-            "--amount",
+            "--amt",
             "12000",
-            "--occur-time",
+            "--time",
             str(base_time + 10),
-            "--e-type",
+            "--et",
             "transfer",
         ]
     )
@@ -340,15 +338,15 @@ def test_cycle_operations():
             "edge",
             "--eid",
             str(e3),
-            "--src-vid",
+            "--src",
             str(v3),
-            "--dst-vid",
+            "--dst",
             str(v1),
-            "--amount",
+            "--amt",
             "15000",
-            "--occur-time",
+            "--time",
             str(base_time + 20),
-            "--e-type",
+            "--et",
             "transfer",
         ]
     )
@@ -361,11 +359,11 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
         ]
     )
@@ -380,11 +378,11 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "any",
         ]
     )
@@ -397,11 +395,11 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "2",
-            "--direction",
+            "--dir",
             "forward",
         ]
     )
@@ -415,13 +413,13 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--vertex-filter-v-type",
+            "--vt",
             "cycle_test",
         ]
     )
@@ -435,13 +433,13 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--vertex-filter-min-balance",
+            "--min-bal",
             "40000",
         ]
     )
@@ -455,13 +453,13 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--edge-filter-e-type",
+            "--et",
             "transfer",
         ]
     )
@@ -475,13 +473,13 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--edge-filter-min-amount",
+            "--min-amt",
             "9000",
         ]
     )
@@ -495,13 +493,13 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--edge-filter-max-amount",
+            "--max-amt",
             "20000",
         ]
     )
@@ -537,17 +535,17 @@ def test_cycle_operations():
         [
             "query",
             "cycle",
-            "--start-vid",
+            "--start",
             str(v1),
-            "--max-depth",
+            "--depth",
             "10",
-            "--direction",
+            "--dir",
             "forward",
-            "--vertex-filter-v-type",
+            "--vt",
             "cycle_test",
-            "--vertex-filter-min-balance",
+            "--min-bal",
             "45000",
-            "--edge-filter-min-amount",
+            "--min-amt",
             "9000",
         ]
     )
@@ -638,6 +636,98 @@ def test_cycle_operations():
     print("\n✓ 环路查询测试通过")
 
 
+def test_delete_operations():
+    """测试删除操作。"""
+    print("\n" + "=" * 50)
+    print("测试 7: 删除操作")
+    print("=" * 50)
+
+    # 准备测试数据
+    print("\n[7.0] 准备测试数据")
+    test_vid1 = 700001
+    test_vid2 = 700002
+    test_eid1 = 700001
+    test_eid2 = 700002
+
+    # 创建测试点
+    run_command(["insert", "vertex", "--vt", "test", "--vid", str(test_vid1)])
+    run_command(["insert", "vertex", "--vt", "test", "--vid", str(test_vid2)])
+
+    # 创建测试边
+    run_command(
+        [
+            "insert",
+            "edge",
+            "--eid",
+            str(test_eid1),
+            "--src",
+            str(test_vid1),
+            "--dst",
+            str(test_vid2),
+            "--amt",
+            "1000",
+        ]
+    )
+    run_command(
+        [
+            "insert",
+            "edge",
+            "--eid",
+            str(test_eid2),
+            "--src",
+            str(test_vid2),
+            "--dst",
+            str(test_vid1),
+            "--amt",
+            "2000",
+        ]
+    )
+
+    # 1. 删除边
+    print("\n[7.1] 删除边")
+    result = run_command(["delete", "edge", "--eid", str(test_eid1)])
+    assert result.get("status") == "success", "删除边失败"
+    assert result["data"]["eid"] == test_eid1, "返回的边ID不匹配"
+
+    # 2. 验证边已删除
+    print("\n[7.2] 验证边已删除")
+    result = run_command(["query", "edge", "--eid", str(test_eid1)])
+    assert result.get("count") == 0, "边应该已被删除"
+
+    # 3. 删除不存在的边（应失败）
+    print("\n[7.3] 删除不存在的边（应失败）")
+    result = run_command(["delete", "edge", "--eid", str(test_eid1)])
+    assert result.get("status") == "error", "删除不存在的边应该失败"
+
+    # 4. 删除点（应同时删除相关边）
+    print("\n[7.4] 删除点（应同时删除相关边）")
+    result = run_command(["delete", "vertex", "--vid", str(test_vid1)])
+    assert result.get("status") == "success", "删除点失败"
+    assert result["data"]["vid"] == test_vid1, "返回的点ID不匹配"
+    assert result["data"]["edges_deleted"] == 1, "应该删除1条相关边"
+
+    # 5. 验证点已删除
+    print("\n[7.5] 验证点已删除")
+    result = run_command(["query", "vertex", "--vid", str(test_vid1)])
+    assert result.get("count") == 0, "点应该已被删除"
+
+    # 6. 验证相关边也被删除
+    print("\n[7.6] 验证相关边也被删除")
+    result = run_command(["query", "edge", "--eid", str(test_eid2)])
+    assert result.get("count") == 0, "相关边应该已被删除"
+
+    # 7. 删除不存在的点（应失败）
+    print("\n[7.7] 删除不存在的点（应失败）")
+    result = run_command(["delete", "vertex", "--vid", str(test_vid1)])
+    assert result.get("status") == "error", "删除不存在的点应该失败"
+
+    # 8. 清理测试数据
+    print("\n[7.8] 清理测试数据")
+    run_command(["delete", "vertex", "--vid", str(test_vid2)])
+
+    print("\n✓ 删除操作测试通过")
+
+
 def main():
     """运行所有测试。"""
     print("\n" + "=" * 70)
@@ -656,15 +746,15 @@ def main():
 
         # 测试 4: 边操作
         test_edge_operations(vid1, vid2)
-        
-          # 测试 6: 环路查询
+
+        # 测试 6: 环路查询
         test_cycle_operations()
+        
+        test_delete_operations()
 
         # 测试 5: 登出
         test_logout()
-        
-      
-        
+
         print("\n" + "=" * 70)
         print(" ✓ 所有测试通过 ".center(70, "="))
         print("=" * 70)
