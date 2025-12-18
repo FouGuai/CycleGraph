@@ -1,107 +1,98 @@
 """OpenGauss 图数据库 DAO 层 - 面向过程实现。
 
-提供点边表的 DDL 初始化、索引创建及通用 SQL 执行接口。
+提供通用 SQL 执行接口和数据类定义。
 """
 from typing import Any, List, Optional, Tuple
+from dataclasses import dataclass
 
 import psycopg2
 
 from connection import connect
 
 
-# ==================== DDL 定义 ====================
+# ==================== 数据类定义 ====================
 
-def get_vertex_table_ddl() -> str:
-    """返回 Vertex 表的 CREATE TABLE 语句。"""
-    return """
-    CREATE TABLE IF NOT EXISTS vertex (
-        vid       BIGINT PRIMARY KEY,
-        v_type    SMALLINT NOT NULL,
-        create_time BIGINT NOT NULL,
-        balance   BIGINT NOT NULL
-    ) WITH (ORIENTATION = ROW);
-    """
-
-
-def get_edge_table_ddl() -> str:
-    """返回 Edge 表的 CREATE TABLE 语句。"""
-    return """
-    CREATE TABLE IF NOT EXISTS edge (
-        eid        BIGINT PRIMARY KEY,
-        src_vid    BIGINT NOT NULL,
-        dst_vid    BIGINT NOT NULL,
-        amount     BIGINT NOT NULL,
-        occur_time BIGINT NOT NULL,
-        e_type     SMALLINT NOT NULL
-    ) WITH (ORIENTATION = ROW);
-    """
-
-
-def get_edge_indexes_ddl() -> List[str]:
-    """返回 Edge 表核心索引的 DDL 列表（用于时序剪枝加速）。"""
-    return [
-        "CREATE INDEX IF NOT EXISTS idx_edge_src_time ON edge(src_vid, occur_time);",
-        "CREATE INDEX IF NOT EXISTS idx_edge_dst_time ON edge(dst_vid, occur_time);",
-    ]
-
-
-# ==================== 初始化函数 ====================
-
-def init_schema(**db_kwargs: Any) -> None:
-    """初始化数据库 Schema：创建点边表及核心索引。
+@dataclass
+class Vertex:
+    """点数据类"""
+    vid: int
+    v_type: int
+    create_time: int
+    balance: int
     
-    Args:
-        **db_kwargs: 数据库连接参数（可选），会覆盖默认配置
-        
-    Raises:
-        psycopg2.Error: 数据库操作失败
-    """
-    conn = None
-    try:
-        conn = connect(**db_kwargs)
-        conn.autocommit = False
-        cur = conn.cursor()
-        
-        # 1. 创建 Vertex 表
-        cur.execute(get_vertex_table_ddl())
-        print("✓ Vertex 表创建成功")
-        
-        # 2. 创建 Edge 表
-        cur.execute(get_edge_table_ddl())
-        print("✓ Edge 表创建成功")
-        
-        # 3. 创建索引
-        for idx_sql in get_edge_indexes_ddl():
-            cur.execute(idx_sql)
-        print("✓ Edge 表索引创建成功")
-        
-        conn.commit()
-        cur.close()
-        print("✓ Schema 初始化完成")
-        
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise Exception(f"初始化 Schema 失败: {e}") from e
-    finally:
-        if conn:
-            conn.close()
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "vid": self.vid,
+            "v_type": self.v_type,
+            "create_time": self.create_time,
+            "balance": self.balance
+        }
+    
+    @classmethod
+    def from_tuple(cls, data: Tuple) -> 'Vertex':
+        """从数据库查询结果元组创建实例"""
+        return cls(vid=data[0], v_type=data[1], create_time=data[2], balance=data[3])
 
 
-def drop_all_tables(**db_kwargs: Any) -> None:
-    """删除点边表（危险操作，仅用于测试环境重置）。"""
-    conn = None
-    try:
-        conn = connect(**db_kwargs)
-        cur = conn.cursor()
-        cur.execute("DROP TABLE IF EXISTS edge CASCADE;")
-        cur.execute("DROP TABLE IF EXISTS vertex CASCADE;")
-        conn.commit()
-        cur.close()
-        print("✓ 已删除所有表")
-    finally:
-        if conn:
-            conn.close()
+@dataclass
+class Edge:
+    """边数据类"""
+    eid: int
+    src_vid: int
+    dst_vid: int
+    amount: int
+    occur_time: int
+    e_type: int
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "eid": self.eid,
+            "src_vid": self.src_vid,
+            "dst_vid": self.dst_vid,
+            "amount": self.amount,
+            "occur_time": self.occur_time,
+            "e_type": self.e_type
+        }
+    
+    @classmethod
+    def from_tuple(cls, data: Tuple) -> 'Edge':
+        """从数据库查询结果元组创建实例"""
+        return cls(
+            eid=data[0], src_vid=data[1], dst_vid=data[2],
+            amount=data[3], occur_time=data[4], e_type=data[5]
+        )
+
+
+@dataclass
+class User:
+    """用户数据类"""
+    user_id: int
+    username: str
+    password_hash: str
+    created_at: int
+    last_login: Optional[int] = None
+    
+    def to_dict(self) -> dict:
+        """转换为字典（不包含密码哈希）"""
+        return {
+            "user_id": self.user_id,
+            "username": self.username,
+            "created_at": self.created_at,
+            "last_login": self.last_login
+        }
+    
+    @classmethod
+    def from_tuple(cls, data: Tuple) -> 'User':
+        """从数据库查询结果元组创建实例"""
+        return cls(
+            user_id=data[0],
+            username=data[1],
+            password_hash=data[2],
+            created_at=data[3],
+            last_login=data[4] if len(data) > 4 else None
+        )
 
 
 # ==================== 通用 SQL 执行接口 ====================
@@ -213,6 +204,37 @@ def fetch_one(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> Opt
             conn.close()
 
 
+def execute_batch(sql: str, params_list: List[Tuple], **db_kwargs: Any) -> int:
+    """批量执行 DML 语句。
+    
+    Args:
+        sql: 要执行的 SQL 语句
+        params_list: 参数元组列表
+        **db_kwargs: 数据库连接参数
+        
+    Returns:
+        int: 总共受影响的行数
+    """
+    conn = None
+    try:
+        conn = connect(**db_kwargs)
+        cur = conn.cursor()
+        total_rows = 0
+        for params in params_list:
+            cur.execute(sql, params)
+            total_rows += cur.rowcount
+        conn.commit()
+        cur.close()
+        return total_rows
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"批量执行失败: {sql[:100]}... | 错误: {e}") from e
+    finally:
+        if conn:
+            conn.close()
+
+
 # ==================== 便捷测试函数 ====================
 
 def test_connection(**db_kwargs: Any) -> bool:
@@ -236,12 +258,15 @@ if __name__ == "__main__":
     print("=== 测试数据库连接 ===")
     test_connection()
     
-    print("\n=== 初始化 Schema ===")
-    init_schema()
+    print("\n=== 测试数据类 ===")
+    # 测试 Vertex
+    v = Vertex(vid=1, v_type=1, create_time=1234567890, balance=10000)
+    print(f"Vertex: {v.to_dict()}")
     
-    print("\n=== 验证表是否存在 ===")
-    tables = fetch_all("""
-        SELECT tablename FROM pg_tables 
-        WHERE schemaname = 'public' AND tablename IN ('vertex', 'edge');
-    """)
-    print(f"已创建的表: {[t[0] for t in tables]}")
+    # 测试 Edge
+    e = Edge(eid=1, src_vid=1, dst_vid=2, amount=5000, occur_time=1234567890, e_type=0)
+    print(f"Edge: {e.to_dict()}")
+    
+    # 测试 User
+    u = User(user_id=1, username="alice", password_hash="hash123", created_at=1234567890)
+    print(f"User: {u.to_dict()}")
