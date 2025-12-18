@@ -14,162 +14,200 @@ from server.core.graph_service import (
     query_vertices,
     query_edges,
     insert_vertex,
-    insert_edge
+    insert_edge,
+    query_cycles,
 )
 
 
-def execute_command(args_list: List[str]) -> Dict[str, Any]:
+def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
     """执行 CLI 命令并返回结果字典。
-    
+
     Args:
         args_list: 命令参数列表,例如 ['register', '--username', 'alice', '--password', 'pass123']
-        
+
     Returns:
         Dict: 执行结果的字典
     """
     parser = argparse.ArgumentParser(
-        prog='cgql',
-        description='CycleGraph Query Language - 图数据库命令行工具'
+        prog="cgql", description="CycleGraph Query Language - 图数据库命令行工具"
     )
-    
-    subparsers = parser.add_subparsers(dest='command', help='子命令')
-    
+
+    subparsers = parser.add_subparsers(dest="command", help="子命令")
+
     # ==================== 用户认证命令 ====================
-    
+
     # register
-    parser_register = subparsers.add_parser('register', help='注册新用户')
-    parser_register.add_argument('--username', required=True, help='用户名')
-    parser_register.add_argument('--password', required=True, help='密码')
-    
+    parser_register = subparsers.add_parser("register", help="注册新用户")
+    parser_register.add_argument("--username", required=True, help="用户名")
+    parser_register.add_argument("--password", required=True, help="密码")
+
     # login
-    parser_login = subparsers.add_parser('login', help='用户登录')
-    parser_login.add_argument('--username', required=True, help='用户名')
-    parser_login.add_argument('--password', required=True, help='密码')
-    
+    parser_login = subparsers.add_parser("login", help="用户登录")
+    parser_login.add_argument("--username", required=True, help="用户名")
+    parser_login.add_argument("--password", required=True, help="密码")
+
     # logout
-    parser_logout = subparsers.add_parser('logout', help='登出并清除会话')
-    
+    parser_logout = subparsers.add_parser("logout", help="登出并清除会话")
+
     # whoami
-    parser_whoami = subparsers.add_parser('whoami', help='查看当前登录用户')
-    
+    parser_whoami = subparsers.add_parser("whoami", help="查看当前登录用户")
+
     # ==================== 连接管理命令 ====================
-    
+
     # connect
-    parser_connect = subparsers.add_parser('connect', help='连接到服务器')
-    parser_connect.add_argument('host', help='服务器地址 (例如: http://127.0.0.1:8000)')
-    
+    parser_connect = subparsers.add_parser("connect", help="连接到服务器")
+    parser_connect.add_argument("host", help="服务器地址 (例如: http://127.0.0.1:8000)")
+
     # ==================== 查询命令 ====================
-    
-    parser_query = subparsers.add_parser('query', help='查询数据')
-    query_subparsers = parser_query.add_subparsers(dest='query_type', help='查询类型')
-    
+
+    parser_query = subparsers.add_parser("query", help="查询数据")
+    query_subparsers = parser_query.add_subparsers(dest="query_type", help="查询类型")
+
     # query vertex
-    parser_query_vertex = query_subparsers.add_parser('vertex', help='查询点')
-    parser_query_vertex.add_argument('--vid', type=int, help='点 ID')
-    parser_query_vertex.add_argument('--v-type', type=int, nargs='+', help='点类型')
-    parser_query_vertex.add_argument('--min-create-time', type=int, help='最小创建时间')
-    parser_query_vertex.add_argument('--max-create-time', type=int, help='最大创建时间')
-    parser_query_vertex.add_argument('--min-balance', type=int, help='最小余额')
-    parser_query_vertex.add_argument('--max-balance', type=int, help='最大余额')
-    
+    parser_query_vertex = query_subparsers.add_parser("vertex", help="查询点")
+    parser_query_vertex.add_argument("--vid", type=int, help="点 ID")
+    parser_query_vertex.add_argument("--v-type", type=str, nargs="+", help="点类型")
+    parser_query_vertex.add_argument("--min-create-time", type=int, help="最小创建时间")
+    parser_query_vertex.add_argument("--max-create-time", type=int, help="最大创建时间")
+    parser_query_vertex.add_argument("--min-balance", type=int, help="最小余额")
+    parser_query_vertex.add_argument("--max-balance", type=int, help="最大余额")
+
     # query edge
-    parser_query_edge = query_subparsers.add_parser('edge', help='查询边')
-    parser_query_edge.add_argument('--eid', type=int, help='边 ID')
-    parser_query_edge.add_argument('--src-vid', type=int, help='源点 ID')
-    parser_query_edge.add_argument('--dst-vid', type=int, help='目标点 ID')
-    parser_query_edge.add_argument('--e-type', type=int, nargs='+', help='边类型')
-    parser_query_edge.add_argument('--min-amount', type=int, help='最小交易金额')
-    parser_query_edge.add_argument('--max-amount', type=int, help='最大交易金额')
-    parser_query_edge.add_argument('--min-occur-time', type=int, help='最小发生时间')
-    parser_query_edge.add_argument('--max-occur-time', type=int, help='最大发生时间')
-    
+    parser_query_edge = query_subparsers.add_parser("edge", help="查询边")
+    parser_query_edge.add_argument("--eid", type=int, help="边 ID")
+    parser_query_edge.add_argument("--src-vid", type=int, help="源点 ID")
+    parser_query_edge.add_argument("--dst-vid", type=int, help="目标点 ID")
+    parser_query_edge.add_argument("--e-type", type=str, nargs="+", help="边类型")
+    parser_query_edge.add_argument("--min-amount", type=int, help="最小交易金额")
+    parser_query_edge.add_argument("--max-amount", type=int, help="最大交易金额")
+    parser_query_edge.add_argument("--min-occur-time", type=int, help="最小发生时间")
+    parser_query_edge.add_argument("--max-occur-time", type=int, help="最大发生时间")
+
     # query cycle (暂时未实现)
-    parser_query_cycle = query_subparsers.add_parser('cycle', help='查询环路')
-    parser_query_cycle.add_argument('--start-vid', type=int, required=True, help='起始点 ID')
-    parser_query_cycle.add_argument('--max-depth', type=int, required=True, help='最大深度')
-    parser_query_cycle.add_argument('--direction', choices=['forward', 'any'], default='forward', help='方向')
-    
+    parser_query_cycle = query_subparsers.add_parser("cycle", help="查询环路")
+    parser_query_cycle.add_argument(
+        "--start-vid", type=int, required=True, help="起始点 ID"
+    )
+    parser_query_cycle.add_argument(
+        "--max-depth", type=int, required=True, help="最大深度"
+    )
+    parser_query_cycle.add_argument(
+        "--direction", choices=["forward", "any"], default="forward", help="方向"
+    )
+    # 添加点过滤参数
+    parser_query_cycle.add_argument(
+        "--vertex-filter-v-type", type=str, nargs="+", help="点类型过滤"
+    )
+    parser_query_cycle.add_argument(
+        "--vertex-filter-min-balance", type=int, help="点最小余额过滤"
+    )
+    # 添加边过滤参数
+    parser_query_cycle.add_argument(
+        "--edge-filter-e-type", type=str, nargs="+", help="边类型过滤"
+    )
+    parser_query_cycle.add_argument(
+        "--edge-filter-min-amount", type=int, help="边最小金额过滤"
+    )
+    parser_query_cycle.add_argument(
+        "--edge-filter-max-amount", type=int, help="边最大金额过滤"
+    )
+
     # ==================== 插入命令 ====================
-    
-    parser_insert = subparsers.add_parser('insert', help='插入数据')
-    insert_subparsers = parser_insert.add_subparsers(dest='insert_type', help='插入类型')
-    
+
+    parser_insert = subparsers.add_parser("insert", help="插入数据")
+    insert_subparsers = parser_insert.add_subparsers(
+        dest="insert_type", help="插入类型"
+    )
+
     # insert vertex
-    parser_insert_vertex = insert_subparsers.add_parser('vertex', help='插入点')
-    parser_insert_vertex.add_argument('--v-type', type=int, required=True, help='点类型')
-    parser_insert_vertex.add_argument('--vid', type=int, help='点 ID (可选，默认自动生成)')
-    parser_insert_vertex.add_argument('--create-time', type=int, help='创建时间 (Unix 时间戳)')
-    parser_insert_vertex.add_argument('--balance', type=int, default=0, help='初始余额')
-    
+    parser_insert_vertex = insert_subparsers.add_parser("vertex", help="插入点")
+    parser_insert_vertex.add_argument(
+        "--v-type", type=str, required=True, help="点类型"
+    )
+    parser_insert_vertex.add_argument(
+        "--vid", type=int, help="点 ID (可选，默认自动生成)"
+    )
+    parser_insert_vertex.add_argument(
+        "--create-time", type=int, help="创建时间 (Unix 时间戳)"
+    )
+    parser_insert_vertex.add_argument("--balance", type=int, default=0, help="初始余额")
+
     # insert edge
-    parser_insert_edge = insert_subparsers.add_parser('edge', help='插入边')
-    parser_insert_edge.add_argument('--eid', type=int, required=True, help='边 ID')
-    parser_insert_edge.add_argument('--src-vid', type=int, required=True, help='源点 ID')
-    parser_insert_edge.add_argument('--dst-vid', type=int, required=True, help='目标点 ID')
-    parser_insert_edge.add_argument('--amount', type=int, required=True, help='交易金额')
-    parser_insert_edge.add_argument('--occur-time', type=int, help='发生时间 (Unix 时间戳)')
-    parser_insert_edge.add_argument('--e-type', type=int, default=0, help='边类型')
-    parser_insert_edge.add_argument('--create-vertices', action='store_true', help='自动创建不存在的点')
-    
+    parser_insert_edge = insert_subparsers.add_parser("edge", help="插入边")
+    parser_insert_edge.add_argument("--eid", type=int, required=True, help="边 ID")
+    parser_insert_edge.add_argument(
+        "--src-vid", type=int, required=True, help="源点 ID"
+    )
+    parser_insert_edge.add_argument(
+        "--dst-vid", type=int, required=True, help="目标点 ID"
+    )
+    parser_insert_edge.add_argument(
+        "--amount", type=int, required=True, help="交易金额"
+    )
+    parser_insert_edge.add_argument(
+        "--occur-time", type=int, help="发生时间 (Unix 时间戳)"
+    )
+    parser_insert_edge.add_argument("--e-type", type=str, default="+", help="边类型")
+    parser_insert_edge.add_argument(
+        "--create-vertices", action="store_true", help="自动创建不存在的点"
+    )
+
     try:
         args = parser.parse_args(args_list)
     except SystemExit:
         return {"status": "error", "message": "Invalid command or arguments"}
-    
+
     # 初始化会话
     session = Session()
-    
+
     # 处理命令
-    if args.command == 'register':
+    if args.command == "register":
         result = register_user(args.username, args.password)
         return result
-    
-    elif args.command == 'login':
+
+    elif args.command == "login":
         result = login_user(args.username, args.password)
-        if result['status'] == 'success':
-            session.set_token(result['token'], result['username'])
-        return {"status": result['status'], "message": result.get('message', '')}
-    
-    elif args.command == 'logout':
+        if result["status"] == "success":
+            session.set_token(result["token"], result["username"])
+        return {"status": result["status"], "message": result.get("message", "")}
+
+    elif args.command == "logout":
         session.clear()
         return {"status": "success", "message": "Logged out and session cleared."}
-    
-    elif args.command == 'whoami':
+
+    elif args.command == "whoami":
         if session.is_logged_in():
             return {
                 "status": "success",
                 "found": True,
-                "current_user": session.get_username()
+                "current_user": session.get_username(),
             }
         else:
-            return {
-                "status": "error",
-                "message": "Not logged in"
-            }
-    
-    elif args.command == 'connect':
+            return {"status": "error", "message": "Not logged in"}
+
+    elif args.command == "connect":
         session.set_host(args.host)
         return {
             "status": "success",
-            "message": f"Successfully connected to {args.host}. Session configuration saved."
+            "message": f"Successfully connected to {args.host}. Session configuration saved.",
         }
-    
-    elif args.command == 'query':
+
+    elif args.command == "query":
         if not session.is_logged_in():
             return {"status": "error", "message": "Please login first"}
-        
-        if args.query_type == 'vertex':
+
+        if args.query_type == "vertex":
             result = query_vertices(
                 vid=args.vid,
                 v_types=args.v_type,
                 min_create_time=args.min_create_time,
                 max_create_time=args.max_create_time,
                 min_balance=args.min_balance,
-                max_balance=args.max_balance
+                max_balance=args.max_balance,
             )
             return result
-        
-        elif args.query_type == 'edge':
+
+        elif args.query_type == "edge":
             result = query_edges(
                 eid=args.eid,
                 src_vid=args.src_vid,
@@ -178,30 +216,49 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:
                 min_amount=args.min_amount,
                 max_amount=args.max_amount,
                 min_occur_time=args.min_occur_time,
-                max_occur_time=args.max_occur_time
+                max_occur_time=args.max_occur_time,
             )
             return result
-        
-        elif args.query_type == 'cycle':
-            return {
-                "status": "error",
-                "message": "Cycle query not implemented yet"
+
+        elif args.query_type == "cycle":
+            # 构建过滤参数
+            kwargs = {
+                "start_vid": args.start_vid,
+                "max_depth": args.max_depth,
+                "direction": args.direction,
             }
-    
-    elif args.command == 'insert':
+
+            # 添加可选参数
+            if hasattr(args, "vertex_filter_v_type") and args.vertex_filter_v_type:
+                kwargs["vertex_filter_v_type"] = args.vertex_filter_v_type
+            if (
+                hasattr(args, "vertex_filter_min_balance")
+                and args.vertex_filter_min_balance
+            ):
+                kwargs["vertex_filter_min_balance"] = args.vertex_filter_min_balance
+            if hasattr(args, "edge_filter_e_type") and args.edge_filter_e_type:
+                kwargs["edge_filter_e_type"] = args.edge_filter_e_type
+            if hasattr(args, "edge_filter_min_amount") and args.edge_filter_min_amount:
+                kwargs["edge_filter_min_amount"] = args.edge_filter_min_amount
+            if hasattr(args, "edge_filter_max_amount") and args.edge_filter_max_amount:
+                kwargs["edge_filter_max_amount"] = args.edge_filter_max_amount
+            result = query_cycles(**kwargs)
+            return result
+
+    elif args.command == "insert":
         if not session.is_logged_in():
             return {"status": "error", "message": "Please login first"}
-        
-        if args.insert_type == 'vertex':
+
+        if args.insert_type == "vertex":
             result = insert_vertex(
                 v_type=args.v_type,
                 vid=args.vid,
                 create_time=args.create_time,
-                balance=args.balance
+                balance=args.balance,
             )
             return result
-        
-        elif args.insert_type == 'edge':
+
+        elif args.insert_type == "edge":
             result = insert_edge(
                 eid=args.eid,
                 src_vid=args.src_vid,
@@ -209,20 +266,20 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:
                 amount=args.amount,
                 occur_time=args.occur_time,
                 e_type=args.e_type,
-                create_vertices=args.create_vertices
+                create_vertices=args.create_vertices,
             )
             return result
-    
+
     else:
         return {"status": "error", "message": "Unknown command"}
 
 
 def execute_command_from_string(command_str: str) -> str:
     """从命令字符串执行并返回 JSON 字符串。
-    
+
     Args:
         command_str: 命令字符串,例如 "register --username alice --password pass123"
-        
+
     Returns:
         str: JSON 格式的结果字符串
     """
@@ -237,5 +294,5 @@ def main():
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

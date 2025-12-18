@@ -14,6 +14,7 @@ from server.opengauss.graph_dao import (
 
 # ==================== DDL 定义 ====================
 
+
 def get_vertex_table_ddl() -> str:
     """返回 Vertex 表的 CREATE TABLE 语句。"""
     return """
@@ -79,12 +80,13 @@ def get_drop_tables_ddl() -> List[str]:
 
 # ==================== 初始化函数 ====================
 
+
 def init_schema(**db_kwargs: Any) -> None:
     """初始化数据库 Schema：创建点边表、用户表及核心索引。
-    
+
     Args:
         **db_kwargs: 数据库连接参数（可选），会覆盖默认配置
-        
+
     Raises:
         Exception: 数据库操作失败
     """
@@ -92,27 +94,27 @@ def init_schema(**db_kwargs: Any) -> None:
         # 1. 创建 Vertex 表
         execute_ddl(get_vertex_table_ddl(), **db_kwargs)
         print("✓ Vertex 表创建成功")
-        
+
         # 2. 创建 Edge 表
         execute_ddl(get_edge_table_ddl(), **db_kwargs)
         print("✓ Edge 表创建成功")
-        
+
         # 3. 创建 User 表
         execute_ddl(get_user_table_ddl(), **db_kwargs)
         print("✓ Users 表创建成功")
-        
+
         # 4. 创建 Edge 索引
         for idx_sql in get_edge_indexes_ddl():
             execute_ddl(idx_sql, **db_kwargs)
         print("✓ Edge 表索引创建成功")
-        
+
         # 5. 创建 User 索引
         for idx_sql in get_user_indexes_ddl():
             execute_ddl(idx_sql, **db_kwargs)
         print("✓ Users 表索引创建成功")
-        
+
         print("✓ Schema 初始化完成")
-        
+
     except Exception as e:
         raise Exception(f"初始化 Schema 失败: {e}") from e
 
@@ -129,29 +131,32 @@ def drop_all_tables(**db_kwargs: Any) -> None:
 
 def verify_schema(**db_kwargs: Any) -> bool:
     """验证 Schema 是否正确创建。
-    
+
     Returns:
         bool: 所有表都存在返回 True，否则返回 False
     """
     try:
-        tables = fetch_all("""
+        tables = fetch_all(
+            """
             SELECT tablename FROM pg_tables 
             WHERE schemaname = 'public' AND tablename IN ('vertex', 'edge', 'users');
-        """, **db_kwargs)
-        
+        """,
+            **db_kwargs,
+        )
+
         table_names = [t[0] for t in tables]
-        expected_tables = ['vertex', 'edge', 'users']
-        
+        expected_tables = ["vertex", "edge", "users"]
+
         print(f"已创建的表: {table_names}")
-        
+
         missing_tables = set(expected_tables) - set(table_names)
         if missing_tables:
             print(f"✗ 缺失的表: {missing_tables}")
             return False
-        
+
         print("✓ 所有必需的表都已创建")
         return True
-        
+
     except Exception as e:
         print(f"✗ 验证 Schema 失败: {e}")
         return False
@@ -159,12 +164,13 @@ def verify_schema(**db_kwargs: Any) -> bool:
 
 # ==================== 主函数 ====================
 
+
 def initialize_database(**db_kwargs) -> bool:
     """初始化数据库 Schema。
-    
+
     Args:
         **db_kwargs: 数据库连接参数（可选），会覆盖默认配置
-        
+
     Returns:
         bool: 初始化成功返回 True，失败返回 False
     """
@@ -172,28 +178,28 @@ def initialize_database(**db_kwargs) -> bool:
         print("=" * 50)
         print("开始初始化数据库 Schema...")
         print("=" * 50)
-        
+
         # 1. 测试连接
         print("\n[1/3] 测试数据库连接...")
         if not test_connection(**db_kwargs):
             print("✗ 数据库连接失败，请检查配置")
             return False
-        
+
         # 2. 创建表和索引
         print("\n[2/3] 创建 Schema（表和索引）...")
         init_schema(**db_kwargs)
-        
+
         # 3. 验证 Schema
         print("\n[3/3] 验证 Schema...")
         if not verify_schema(**db_kwargs):
             print("✗ Schema 验证失败")
             return False
-        
+
         print("\n" + "=" * 50)
         print("✓ 数据库初始化完成！")
         print("=" * 50)
         return True
-        
+
     except Exception as e:
         print(f"\n✗ 初始化失败: {e}")
         return False
@@ -201,12 +207,12 @@ def initialize_database(**db_kwargs) -> bool:
 
 def reset_database(**db_kwargs) -> bool:
     """重置数据库（删除所有表后重新初始化）。
-    
+
     仅用于开发/测试环境。
-    
+
     Args:
         **db_kwargs: 数据库连接参数（可选）
-        
+
     Returns:
         bool: 重置成功返回 True，失败返回 False
     """
@@ -214,31 +220,31 @@ def reset_database(**db_kwargs) -> bool:
         print("=" * 50)
         print("警告：即将删除所有数据表！")
         print("=" * 50)
-        
+
         response = input("是否继续？(yes/no): ").strip().lower()
-        if response != 'yes':
+        if response != "yes":
             print("✗ 已取消操作")
             return False
-        
+
         # 1. 删除表
         print("\n[1/3] 删除已有表...")
         drop_all_tables(**db_kwargs)
-        
+
         # 2. 重新初始化
         print("\n[2/3] 重新初始化 Schema...")
         init_schema(**db_kwargs)
-        
+
         # 3. 验证 Schema
         print("\n[3/3] 验证 Schema...")
         if not verify_schema(**db_kwargs):
             print("✗ Schema 验证失败")
             return False
-        
+
         print("\n" + "=" * 50)
         print("✓ 数据库重置完成！")
         print("=" * 50)
         return True
-        
+
     except Exception as e:
         print(f"\n✗ 重置失败: {e}")
         return False
@@ -247,7 +253,7 @@ def reset_database(**db_kwargs) -> bool:
 if __name__ == "__main__":
     # 快速初始化示例
     import sys
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == "reset":
         reset_database()
     else:
