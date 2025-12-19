@@ -259,7 +259,7 @@
           </el-tabs>
         </el-card>
 
-         <!-- 操作结果统计 -->
+        <!-- 操作结果统计 -->
         <el-card class="result-stats" v-if="queryResult" style="margin-bottom: 20px;">
           <template #header>
             <div class="panel-header">
@@ -293,7 +293,7 @@
 
       <!-- 右侧可视化区域 -->
       <el-col :span="16">
-       
+
         <!-- 图可视化 -->
         <el-card class="visualization-panel">
           <template #header>
@@ -332,35 +332,46 @@
           <div v-else>
             <div ref="chartContainer" class="chart-container"></div>
 
-            <!-- 右键菜单 -->
+            <!-- 右键菜单浮动窗口 -->
             <teleport to="body">
-              <div
-                v-if="contextMenuVisible"
-                class="context-menu"
-                :style="{
+              <transition name="context-menu-fade">
+                <el-card v-if="contextMenuVisible" class="context-menu-card" :style="{
                   left: contextMenuPosition.x + 'px',
                   top: contextMenuPosition.y + 'px'
-                }"
-                @click.stop
-              >
-                <div v-if="contextMenuTarget?.type === 'node'" class="menu-item" @click="deleteNodeFromMenu">
-                  <el-icon><Delete /></el-icon>
-                  <span>删除节点 {{ contextMenuTarget.data.id }}</span>
-                </div>
-                <div v-if="contextMenuTarget?.type === 'edge'" class="menu-item" @click="deleteEdgeFromMenu">
-                  <el-icon><Delete /></el-icon>
-                  <span>删除边 {{ contextMenuTarget.data.rawData?.eid }}</span>
-                </div>
-              </div>
+                }" shadow="always" @click.stop>
+                  <template #header>
+                    <div class="context-menu-header">
+                      <span v-if="contextMenuTarget?.type === 'node'">节点操作</span>
+                      <span v-else-if="contextMenuTarget?.type === 'edge'">边操作</span>
+                      <span v-else>快捷操作</span>
+                    </div>
+                  </template>
+                  <div class="context-menu-content">
+                    <div v-if="contextMenuTarget?.type === 'node'" class="menu-item" @click="deleteNodeFromMenu">
+                      <el-icon color="#f56c6c">
+                        <Delete />
+                      </el-icon>
+                      <span>删除节点 {{ contextMenuTarget.data.id }}</span>
+                    </div>
+                    <div v-if="contextMenuTarget?.type === 'edge'" class="menu-item" @click="deleteEdgeFromMenu">
+                      <el-icon color="#f56c6c">
+                        <Delete />
+                      </el-icon>
+                      <span>删除边 {{ contextMenuTarget.data.rawData?.eid }}</span>
+                    </div>
+                    <div v-if="contextMenuTarget?.type === 'blank'" class="menu-item" @click="showQuickInsertDialog">
+                      <el-icon color="#67c23a">
+                        <Plus />
+                      </el-icon>
+                      <span>插入节点</span>
+                    </div>
+                  </div>
+                </el-card>
+              </transition>
             </teleport>
 
             <!-- 快速插入节点对话框 -->
-            <el-dialog
-              v-model="quickInsertDialogVisible"
-              title="快速插入节点"
-              width="400px"
-              :close-on-click-modal="false"
-            >
+            <el-dialog v-model="quickInsertDialogVisible" title="快速插入节点" width="400px" :close-on-click-modal="false">
               <el-form :model="quickInsertVertexForm" label-width="80px">
                 <el-form-item label="点类型" required>
                   <el-input v-model="quickInsertVertexForm.vType" placeholder="例如: account, company" />
@@ -375,18 +386,49 @@
               </template>
             </el-dialog>
 
+            <!-- 快速连边对话框 -->
+            <el-dialog v-model="quickEdgeDialogVisible" title="快速创建边" width="500px" :close-on-click-modal="false">
+              <el-form :model="quickInsertEdgeForm" label-width="100px">
+                <el-form-item label="源点ID">
+                  <el-input-number v-model="quickInsertEdgeForm.srcVid" :min="1" controls-position="right"
+                    style="width: 100%" disabled />
+                </el-form-item>
+                <el-form-item label="目标点ID">
+                  <el-input-number v-model="quickInsertEdgeForm.dstVid" :min="1" controls-position="right"
+                    style="width: 100%" disabled />
+                </el-form-item>
+                <el-form-item label="边ID">
+                  <el-input-number v-model="quickInsertEdgeForm.eid" :min="1" controls-position="right"
+                    style="width: 100%" placeholder="留空自动生成" />
+                </el-form-item>
+                <el-form-item label="交易金额" required>
+                  <el-input-number v-model="quickInsertEdgeForm.amount" :min="0" controls-position="right"
+                    style="width: 100%" />
+                </el-form-item>
+                <el-form-item label="边类型">
+                  <el-input v-model="quickInsertEdgeForm.eType" placeholder="例如: transfer, 留空默认为 +" clearable />
+                </el-form-item>
+                <el-form-item label="发生时间">
+                  <el-date-picker v-model="quickInsertEdgeForm.occurTime" type="datetime" placeholder="留空使用当前时间"
+                    style="width: 100%" />
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <el-button @click="cancelQuickEdge">取消</el-button>
+                <el-button type="primary" @click="confirmQuickEdge" :loading="loading">创建</el-button>
+              </template>
+            </el-dialog>
+
             <!-- Shift+点击提示 -->
             <div v-if="selectedNodesForEdge.length > 0" class="selection-hint">
               <el-tag type="danger" size="large" effect="dark">
-                <el-icon><Connection /></el-icon>
+                <el-icon>
+                  <Connection />
+                </el-icon>
                 已选中 {{ selectedNodesForEdge.length }} 个节点: {{ selectedNodesForEdge.join(', ') }}
                 <span v-if="selectedNodesForEdge.length < 2"> - 再选择一个节点以创建边</span>
-                <el-button
-                  text
-                  size="small"
-                  @click="selectedNodesForEdge = []; updateNodeSelection()"
-                  style="margin-left: 10px; color: white;"
-                >
+                <el-button text size="small" @click="selectedNodesForEdge = []; updateNodeSelection()"
+                  style="margin-left: 10px; color: white;">
                   清除
                 </el-button>
               </el-tag>
@@ -425,22 +467,14 @@
                         </template>
                       </div>
                     </div>
-                    <el-button 
-                      size="small" 
-                      :type="displayedCycles.length === 1 && displayedCycles[0] === index ? 'success' : 'primary'" 
-                      @click="highlightCycle(index)"
-                      style="margin-top: 10px"
-                    >
+                    <el-button size="small"
+                      :type="displayedCycles.length === 1 && displayedCycles[0] === index ? 'success' : 'primary'"
+                      @click="highlightCycle(index)" style="margin-top: 10px">
                       {{ displayedCycles.length === 1 && displayedCycles[0] === index ? '✓ 已显示此环路' : '单独显示此环路' }}
                     </el-button>
-                    <el-button 
-                      v-if="displayedCycles.length === 1 && displayedCycles[0] === index"
-                      size="small" 
-                      type="info" 
-                      plain
-                      @click="buildGraphFromCycles(cycleList)"
-                      style="margin-top: 10px; margin-left: 10px"
-                    >
+                    <el-button v-if="displayedCycles.length === 1 && displayedCycles[0] === index" size="small"
+                      type="info" plain @click="buildGraphFromCycles(cycleList)"
+                      style="margin-top: 10px; margin-left: 10px">
                       显示所有环路
                     </el-button>
                   </div>
@@ -545,17 +579,23 @@ const maxDisplayCycles = 5 // 最多同时显示的环路数量
 // 交互相关状态
 const contextMenuVisible = ref(false)
 const contextMenuPosition = ref({ x: 0, y: 0 })
-const contextMenuTarget = ref(null) // { type: 'node'|'edge', data: ... }
+const contextMenuTarget = ref(null) // { type: 'node'|'edge'|'blank', data: ... }
 const quickInsertDialogVisible = ref(false)
+const quickEdgeDialogVisible = ref(false)
 const quickInsertPosition = ref({ x: 0, y: 0 })
 const selectedNodesForEdge = ref([]) // 用于Shift+点击选择两个节点连边
+const isShiftKeyPressed = ref(false) // 跟踪Shift键状态
 const quickInsertVertexForm = reactive({
   vType: 'account',
   balance: 0
 })
 const quickInsertEdgeForm = reactive({
+  srcVid: null,
+  dstVid: null,
+  eid: null,
   amount: 1000,
-  eType: '+'
+  eType: '+',
+  occurTime: null
 })
 
 // 时间格式化辅助函数
@@ -942,6 +982,12 @@ const buildGraphFromVertices = (vertices) => {
 
 // 从边数据构建图
 const buildGraphFromEdges = async (edges) => {
+  if (!edges || edges.length === 0) {
+    ElMessage.warning('没有找到匹配的边')
+    clearGraph()
+    return
+  }
+
   // 收集所有涉及的点ID
   const vidSet = new Set()
   edges.forEach(e => {
@@ -949,8 +995,12 @@ const buildGraphFromEdges = async (edges) => {
     vidSet.add(e.dst_vid)
   })
 
-  // 查询这些点的详细信息
+  ElMessage.info(`正在查询 ${vidSet.size} 个相关节点...`)
+
+  // 批量查询这些点的详细信息
   const nodes = []
+  let successCount = 0
+  
   for (const vid of vidSet) {
     try {
       const response = await executeCommand(['query', 'vertex', '--vid', vid.toString()])
@@ -962,18 +1012,30 @@ const buildGraphFromEdges = async (edges) => {
           value: v.balance,
           category: v.v_type,
           symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
-          rawData: v // 保留原始数据
+          rawData: v
+        })
+        successCount++
+      } else {
+        // 点不存在，创建占位节点
+        nodes.push({
+          id: vid.toString(),
+          name: `V${vid}`,
+          value: 0,
+          category: 'unknown',
+          symbolSize: 40,
+          rawData: { vid, v_type: 'unknown', balance: 0, create_time: null }
         })
       }
     } catch (error) {
-      // 如果查询失败，创建默认节点
+      console.error(`查询点 ${vid} 失败:`, error)
+      // 创建默认节点
       nodes.push({
         id: vid.toString(),
         name: `V${vid}`,
         value: 0,
         category: 'unknown',
         symbolSize: 40,
-        rawData: { vid, v_type: 'unknown', balance: 0, create_time: null } // 默认数据
+        rawData: { vid, v_type: 'unknown', balance: 0, create_time: null }
       })
     }
   }
@@ -985,20 +1047,23 @@ const buildGraphFromEdges = async (edges) => {
     value: e.amount,
     label: e.e_type,
     lineStyle: {
-      width: Math.max(1, Math.min(5, e.amount / 5000))
+      width: Math.max(1, Math.min(5, e.amount / 5000)),
+      color: 'source'
     },
-    rawData: e // 保留原始数据
+    rawData: e
   }))
 
   hasGraphData.value = true
   renderGraph()
+  
+  ElMessage.success(`显示 ${edges.length} 条边，${successCount} 个节点`)
 }
 
 // 从环路数据构建图
 const buildGraphFromCycles = (cycles) => {
   const nodeMap = new Map()
   const edgeMap = new Map()
-  
+
   // 确定要显示的环路数量
   const cyclesToDisplay = Math.min(cycles.length, maxDisplayCycles)
   displayedCycles.value = Array.from({ length: cyclesToDisplay }, (_, i) => i)
@@ -1006,7 +1071,7 @@ const buildGraphFromCycles = (cycles) => {
   // 合并前N个环的数据
   for (let i = 0; i < cyclesToDisplay; i++) {
     const cycle = cycles[i]
-    
+
     // 添加点
     cycle.vertices.forEach(v => {
       nodeMap.set(v.vid.toString(), {
@@ -1018,7 +1083,7 @@ const buildGraphFromCycles = (cycles) => {
         rawData: v // 保留原始数据
       })
     })
-    
+
     // 添加边
     cycle.edges.forEach(e => {
       const key = `${e.src_vid}-${e.dst_vid}`
@@ -1040,7 +1105,7 @@ const buildGraphFromCycles = (cycles) => {
 
   hasGraphData.value = true
   renderGraph()
-  
+
   // 如果有未显示的环路，提示用户
   if (cycles.length > maxDisplayCycles) {
     ElMessage.info(`图中显示前 ${maxDisplayCycles} 个环路，点击列表中的环路可查看其他环路`)
@@ -1078,7 +1143,14 @@ const renderGraph = () => {
 
     const option = {
       tooltip: {
+        trigger: 'item',
+        triggerOn: 'click', // 改为点击触发
         formatter: function (params) {
+          // 如果按住Shift键，不显示tooltip
+          if (isShiftKeyPressed.value) {
+            return ''
+          }
+          
           if (params.dataType === 'node') {
             const node = params.data
             const raw = node.rawData || {}
@@ -1144,13 +1216,18 @@ const renderGraph = () => {
           fontWeight: 'bold',
           color: '#333'
         },
-        labelLayout: {
-          hideOverlap: true
-        },
         edgeLabel: {
-          show: graphData.links.length > 0 && graphData.links.length <= 20,
-          fontSize: 10,
-          formatter: '{c}'
+          show: graphData.links.length > 0 && graphData.links.length <= 50,
+          fontSize: 11,
+          position: 'middle',
+          formatter: (params) => {
+            const amount = params.data.value || params.data.rawData?.amount || 0
+            return amount.toLocaleString()
+          },
+          color: '#666',
+          backgroundColor: 'rgba(255, 255, 255, 0.8)',
+          padding: [2, 4],
+          borderRadius: 2
         },
         force: {
           repulsion: 500,
@@ -1188,11 +1265,15 @@ const renderGraph = () => {
     // 移除旧的事件监听器
     chartInstance.off('dblclick')
     chartInstance.off('click')
-    
-    // 添加双击事件监听
+    chartInstance.off('contextmenu')
+
+    // 添加双击事件监听（空白处插入节点）
     chartInstance.on('dblclick', handleChartDblClick)
-    
-    // 添加点击事件监听（用于Shift+点击）
+
+    // 添加右键菜单事件监听
+    chartInstance.on('contextmenu', handleChartRightClick)
+
+    // 添加点击事件监听（用于Shift+点击选择节点）
     chartInstance.on('click', handleNodeClick)
 
     // 确保图表自适应容器大小
@@ -1207,13 +1288,13 @@ const renderGraph = () => {
 // 高亮显示环路
 const highlightCycle = (index) => {
   if (!cycleList.value[index]) return
-  
+
   const cycle = cycleList.value[index]
-  
+
   // 重新构建图数据，只显示这个环路
   const nodeMap = new Map()
   const edgeMap = new Map()
-  
+
   // 添加这个环的点
   cycle.vertices.forEach(v => {
     nodeMap.set(v.vid.toString(), {
@@ -1225,7 +1306,7 @@ const highlightCycle = (index) => {
       rawData: v // 保留原始数据
     })
   })
-  
+
   // 添加这个环的边
   cycle.edges.forEach(e => {
     const key = `${e.src_vid}-${e.dst_vid}`
@@ -1240,11 +1321,11 @@ const highlightCycle = (index) => {
       rawData: e // 保留原始数据
     })
   })
-  
+
   graphData.nodes = Array.from(nodeMap.values())
   graphData.links = Array.from(edgeMap.values())
   displayedCycles.value = [index]
-  
+
   renderGraph()
   ElMessage.success(`已切换显示环路 ${index + 1}`)
 }
@@ -1294,16 +1375,38 @@ const clearGraph = () => {
 
 // 处理图表双击事件
 const handleChartDblClick = (params) => {
+  console.log('双击事件:', params)
+  
+  // 双击空白处，显示插入节点对话框
+  if (!params.componentType || params.componentType !== 'series') {
+    console.log('双击空白处，显示插入对话框')
+    quickInsertDialogVisible.value = true
+    quickInsertVertexForm.vType = 'account'
+    quickInsertVertexForm.balance = 0
+  }
+}
+
+// 处理图表右键菜单事件
+const handleChartRightClick = (params) => {
+  console.log('右键事件:', params)
+  
+  // 阻止浏览器默认右键菜单
+  if (params.event && params.event.event) {
+    params.event.event.preventDefault()
+  }
+
   if (params.componentType === 'series') {
     if (params.dataType === 'node') {
-      // 双击节点，显示删除菜单
+      // 右键节点，显示删除菜单
+      console.log('右键节点:', params.data)
       contextMenuTarget.value = {
         type: 'node',
         data: params.data
       }
       showContextMenu(params.event.event)
     } else if (params.dataType === 'edge') {
-      // 双击边，显示删除菜单
+      // 右键边，显示删除菜单
+      console.log('右键边:', params.data)
       contextMenuTarget.value = {
         type: 'edge',
         data: params.data
@@ -1311,10 +1414,13 @@ const handleChartDblClick = (params) => {
       showContextMenu(params.event.event)
     }
   } else {
-    // 双击空白处，显示插入节点对话框
-    quickInsertDialogVisible.value = true
-    quickInsertVertexForm.vType = 'account'
-    quickInsertVertexForm.balance = 0
+    // 右键空白处，显示插入节点菜单
+    console.log('右键空白处')
+    contextMenuTarget.value = {
+      type: 'blank',
+      data: null
+    }
+    showContextMenu(params.event.event)
   }
 }
 
@@ -1336,12 +1442,12 @@ const hideContextMenu = () => {
 // 从右键菜单删除节点
 const deleteNodeFromMenu = async () => {
   if (!contextMenuTarget.value || contextMenuTarget.value.type !== 'node') return
-  
+
   const nodeData = contextMenuTarget.value.data
   const vid = nodeData.rawData?.vid || nodeData.id
-  
+
   hideContextMenu()
-  
+
   try {
     await ElMessageBox.confirm(
       `确定要删除点 ${vid} 吗？这将同时删除所有相关的边。`,
@@ -1385,18 +1491,18 @@ const deleteNodeFromMenu = async () => {
 // 从右键菜单删除边
 const deleteEdgeFromMenu = async () => {
   if (!contextMenuTarget.value || contextMenuTarget.value.type !== 'edge') return
-  
+
   const edgeData = contextMenuTarget.value.data
   const eid = edgeData.rawData?.eid
-  
+
   if (!eid) {
     ElMessage.error('无法获取边ID')
     hideContextMenu()
     return
   }
-  
+
   hideContextMenu()
-  
+
   try {
     await ElMessageBox.confirm(
       `确定要删除边 ${eid} 吗？`,
@@ -1451,28 +1557,51 @@ const quickInsertNode = async () => {
       '--bal', quickInsertVertexForm.balance.toString()
     ]
 
+    console.log('执行快速插入命令:', command)
     const response = await executeCommand(command)
+    console.log('插入响应:', response)
 
     if (response.status === 'success') {
       ElMessage.success(`点插入成功: ID=${response.data?.vid || '自动生成'}`)
       quickInsertDialogVisible.value = false
-      // 刷新全图
-      await queryFullGraph()
+
+      // 重置表单
+      quickInsertVertexForm.vType = 'account'
+      quickInsertVertexForm.balance = 0
+
+      // 刷新当前视图
+      if (activeTab.value === 'fullGraph') {
+        await queryFullGraph()
+      } else {
+        // 如果不在全图视图，也刷新全图以确保数据最新
+        await queryFullGraph()
+      }
     } else {
-      ElMessage.error('插入失败: ' + response.message)
+      ElMessage.error('插入失败: ' + (response.message || '未知错误'))
     }
   } catch (error) {
-    ElMessage.error('插入失败: ' + error.message)
+    console.error('快速插入节点错误:', error)
+    ElMessage.error('插入失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
   }
 }
 
-// 处理Shift+点击选择节点
-const handleNodeClick = (params, event) => {
-  if (event.event.shiftKey && params.dataType === 'node') {
-    const nodeId = params.data.id
+// 处理左键点击显示tooltip和自动填充ID
+const handleNodeClick = (params) => {
+  console.log('点击事件:', params)
+  console.log('是否按住Shift:', params.event?.shiftKey)
+  console.log('数据类型:', params.dataType)
+  
+  // ECharts click 事件: params.event.event 是原始DOM事件
+  const isShiftPressed = params.event?.event?.shiftKey || params.event?.shiftKey
+  
+  if (isShiftPressed && params.dataType === 'node') {
+    // Shift+点击节点：选择节点用于连边，不显示tooltip
+    console.log('Shift+点击节点:', params.data)
     
+    const nodeId = params.data.id
+
     // 如果已经选中这个节点，取消选中
     const index = selectedNodesForEdge.value.indexOf(nodeId)
     if (index > -1) {
@@ -1481,32 +1610,90 @@ const handleNodeClick = (params, event) => {
       updateNodeSelection()
       return
     }
-    
+
     // 如果已经选中了2个节点，先清空
     if (selectedNodesForEdge.value.length >= 2) {
       selectedNodesForEdge.value = []
     }
-    
+
     // 添加选中的节点
     selectedNodesForEdge.value.push(nodeId)
     ElMessage.success(`已选中节点 ${nodeId} (${selectedNodesForEdge.value.length}/2)`)
-    
+
     // 如果选中了2个节点，显示连边对话框
     if (selectedNodesForEdge.value.length === 2) {
       showQuickEdgeDialog()
     }
-    
+
     updateNodeSelection()
+  } else if (!isShiftPressed && (params.dataType === 'node' || params.dataType === 'edge')) {
+    // 普通左键点击：显示tooltip并自动填充ID
+    console.log('左键点击显示tooltip:', params.data)
+    
+    // 自动填充左侧表单的ID字段
+    autoFillFormIds(params)
+  }
+}
+
+// 自动填充左侧表单的ID字段
+const autoFillFormIds = (params) => {
+  if (params.dataType === 'node') {
+    const vid = parseInt(params.data.rawData?.vid || params.data.id)
+    
+    // 根据当前激活的tab自动填充
+    if (mainTab.value === 'query') {
+      if (activeTab.value === 'vertex' && !vertexForm.vid) {
+        vertexForm.vid = vid
+        ElMessage.success(`已自动填充点ID: ${vid}`)
+      } else if (activeTab.value === 'edge') {
+        if (!edgeForm.srcVid) {
+          edgeForm.srcVid = vid
+          ElMessage.success(`已自动填充源点ID: ${vid}`)
+        } else if (!edgeForm.dstVid) {
+          edgeForm.dstVid = vid
+          ElMessage.success(`已自动填充目标点ID: ${vid}`)
+        }
+      } else if (activeTab.value === 'cycle' && !cycleForm.startVid) {
+        cycleForm.startVid = vid
+        ElMessage.success(`已自动填充起始点ID: ${vid}`)
+      }
+    } else if (mainTab.value === 'modify') {
+      if (modifyTab.value === 'insertEdge') {
+        if (!insertEdgeForm.srcVid) {
+          insertEdgeForm.srcVid = vid
+          ElMessage.success(`已自动填充源点ID: ${vid}`)
+        } else if (!insertEdgeForm.dstVid) {
+          insertEdgeForm.dstVid = vid
+          ElMessage.success(`已自动填充目标点ID: ${vid}`)
+        }
+      } else if (modifyTab.value === 'deleteVertex' && !deleteVertexForm.vid) {
+        deleteVertexForm.vid = vid
+        ElMessage.success(`已自动填充点ID: ${vid}`)
+      }
+    }
+  } else if (params.dataType === 'edge') {
+    const eid = params.data.rawData?.eid
+    
+    if (eid) {
+      // 根据当前激活的tab自动填充
+      if (mainTab.value === 'query' && activeTab.value === 'edge' && !edgeForm.eid) {
+        edgeForm.eid = eid
+        ElMessage.success(`已自动填充边ID: ${eid}`)
+      } else if (mainTab.value === 'modify' && modifyTab.value === 'deleteEdge' && !deleteEdgeForm.eid) {
+        deleteEdgeForm.eid = eid
+        ElMessage.success(`已自动填充边ID: ${eid}`)
+      }
+    }
   }
 }
 
 // 更新节点选中状态的视觉效果
 const updateNodeSelection = () => {
   if (!chartInstance) return
-  
+
   const option = chartInstance.getOption()
   if (!option.series || !option.series[0]) return
-  
+
   // 更新节点样式以显示选中状态
   const nodes = option.series[0].data.map(node => {
     const isSelected = selectedNodesForEdge.value.includes(node.id)
@@ -1521,7 +1708,7 @@ const updateNodeSelection = () => {
       }
     }
   })
-  
+
   chartInstance.setOption({
     series: [{
       data: nodes
@@ -1529,33 +1716,38 @@ const updateNodeSelection = () => {
   })
 }
 
-// 显示快速连边对话框
-const showQuickEdgeDialog = () => {
-  // 使用对话框而不是直接执行
-  ElMessageBox.prompt(
-    `在节点 ${selectedNodesForEdge.value[0]} 和 ${selectedNodesForEdge.value[1]} 之间创建边\n\n请输入金额:`,
-    '创建边',
-    {
-      confirmButtonText: '创建',
-      cancelButtonText: '取消',
-      inputPattern: /^\d+$/,
-      inputErrorMessage: '请输入有效的数字',
-      inputValue: '1000',
-      inputPlaceholder: '输入金额'
-    }
-  ).then(async ({ value }) => {
-    await quickInsertEdgeBetweenNodes(parseInt(value))
-  }).catch(() => {
-    ElMessage.info('已取消')
-    selectedNodesForEdge.value = []
-    updateNodeSelection()
-  })
+// 显示快速插入节点对话框
+const showQuickInsertDialog = () => {
+  hideContextMenu()
+  quickInsertDialogVisible.value = true
+  quickInsertVertexForm.vType = 'account'
+  quickInsertVertexForm.balance = 0
 }
 
-// 快速在两个节点之间插入边
-const quickInsertEdgeBetweenNodes = async (amount) => {
-  if (selectedNodesForEdge.value.length !== 2) {
-    ElMessage.warning('请先选择两个节点')
+// 显示快速连边对话框
+const showQuickEdgeDialog = () => {
+  // 填充源点和目标点ID
+  quickInsertEdgeForm.srcVid = parseInt(selectedNodesForEdge.value[0])
+  quickInsertEdgeForm.dstVid = parseInt(selectedNodesForEdge.value[1])
+  quickInsertEdgeForm.eid = null
+  quickInsertEdgeForm.amount = 1000
+  quickInsertEdgeForm.eType = '+'
+  quickInsertEdgeForm.occurTime = null
+  
+  quickEdgeDialogVisible.value = true
+}
+
+// 取消快速连边
+const cancelQuickEdge = () => {
+  quickEdgeDialogVisible.value = false
+  selectedNodesForEdge.value = []
+  updateNodeSelection()
+}
+
+// 确认快速连边
+const confirmQuickEdge = async () => {
+  if (!quickInsertEdgeForm.amount || quickInsertEdgeForm.amount < 0) {
+    ElMessage.warning('请输入有效的交易金额')
     return
   }
 
@@ -1563,32 +1755,41 @@ const quickInsertEdgeBetweenNodes = async (amount) => {
   try {
     const command = [
       'insert', 'edge',
-      '--src', selectedNodesForEdge.value[0].toString(),
-      '--dst', selectedNodesForEdge.value[1].toString(),
-      '--amt', amount.toString(),
-      '--et', '+'
+      '--src', quickInsertEdgeForm.srcVid.toString(),
+      '--dst', quickInsertEdgeForm.dstVid.toString(),
+      '--amt', quickInsertEdgeForm.amount.toString()
     ]
 
+    if (quickInsertEdgeForm.eid) command.push('--eid', quickInsertEdgeForm.eid.toString())
+    if (quickInsertEdgeForm.eType && quickInsertEdgeForm.eType.trim()) {
+      command.push('--et', quickInsertEdgeForm.eType.trim())
+    }
+    if (quickInsertEdgeForm.occurTime) {
+      const timestamp = Math.floor(quickInsertEdgeForm.occurTime.getTime() / 1000)
+      command.push('--time', timestamp.toString())
+    }
+
+    console.log('执行快速连边命令:', command)
     const response = await executeCommand(command)
 
     if (response.status === 'success') {
-      ElMessage.success(`边创建成功: ${selectedNodesForEdge.value[0]} → ${selectedNodesForEdge.value[1]}`)
+      ElMessage.success(`边创建成功: ${quickInsertEdgeForm.srcVid} → ${quickInsertEdgeForm.dstVid}`)
+      quickEdgeDialogVisible.value = false
       selectedNodesForEdge.value = []
       // 刷新全图
       await queryFullGraph()
     } else {
-      ElMessage.error('创建边失败: ' + response.message)
-      selectedNodesForEdge.value = []
-      updateNodeSelection()
+      ElMessage.error('创建边失败: ' + (response.message || '未知错误'))
     }
   } catch (error) {
-    ElMessage.error('创建边失败: ' + error.message)
-    selectedNodesForEdge.value = []
-    updateNodeSelection()
+    console.error('快速连边错误:', error)
+    ElMessage.error('创建边失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
   }
 }
+
+
 
 // 生命周期
 onMounted(() => {
@@ -1597,11 +1798,24 @@ onMounted(() => {
       chartInstance.resize()
     }
   })
-  
+
   // 添加全局点击事件来隐藏右键菜单
   window.addEventListener('click', (e) => {
     if (contextMenuVisible.value) {
       hideContextMenu()
+    }
+  })
+
+  // 监听Shift键状态
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift') {
+      isShiftKeyPressed.value = true
+    }
+  })
+  
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') {
+      isShiftKeyPressed.value = false
     }
   })
 
@@ -1753,36 +1967,80 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
 }
 
-/* 右键菜单样式 */
-.context-menu {
+/* 右键菜单浮动窗口样式 */
+.context-menu-card {
   position: fixed;
-  background: white;
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-  padding: 6px 0;
-  z-index: 9999;
-  min-width: 160px;
+  z-index: 99999 !important;
+  min-width: 180px;
+  max-width: 250px;
+  user-select: none;
+}
+
+.context-menu-card :deep(.el-card__header) {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-bottom: none;
+}
+
+.context-menu-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  text-align: center;
+}
+
+.context-menu-card :deep(.el-card__body) {
+  padding: 8px 0;
+}
+
+.context-menu-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: 12px 16px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s ease;
   font-size: 14px;
   color: #606266;
+  border-radius: 4px;
+  margin: 0 8px;
 }
 
 .menu-item:hover {
-  background-color: #f5f7fa;
-  color: #f56c6c;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8eaf6 100%);
+  color: #303133;
+  transform: translateX(4px);
 }
 
 .menu-item .el-icon {
-  font-size: 16px;
+  font-size: 18px;
+  transition: transform 0.2s ease;
+}
+
+.menu-item:hover .el-icon {
+  transform: scale(1.2);
+}
+
+/* 右键菜单动画 */
+.context-menu-fade-enter-active,
+.context-menu-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.context-menu-fade-enter-from {
+  opacity: 0;
+  transform: scale(0.9) translateY(-10px);
+}
+
+.context-menu-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.9) translateY(10px);
 }
 
 /* 选择提示样式 */
@@ -1800,6 +2058,7 @@ onUnmounted(() => {
     bottom: 0;
     opacity: 0;
   }
+
   to {
     bottom: 30px;
     opacity: 1;

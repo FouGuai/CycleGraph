@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
+  withCredentials: true, // 确保请求携带 cookie
   headers: {
     'Content-Type': 'application/json'
   }

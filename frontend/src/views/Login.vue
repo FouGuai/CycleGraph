@@ -91,9 +91,9 @@ const activeTab = ref('login')
 
 // 设置 Cookie 的辅助函数
 const setCookie = (name, value, days = 7) => {
-  const expires = new Date()
-  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
-  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`
+    const expires = new Date()
+    expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
+    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`
 }
 
 // 登录表单
@@ -169,16 +169,25 @@ const handleLogin = async () => {
                 loginForm.password
             ])
 
+
+            console.log('Login response:', response)
+
             if (response.status === 'success') {
-                // 保存 token 到 cookie
-                setCookie('token', 'logged_in_token', 7) // 保存7天
-                // 保存用户名到 localStorage
+                // 只保存用户名到 localStorage
+                // Token 由后端通过 Set-Cookie header 自动设置
                 localStorage.setItem('username', loginForm.username)
-                
+
+                console.log('Token saved by backend, redirecting to /query')
+
                 ElMessage.success('登录成功！')
-                
-                // 跳转到图查询页面
-                await router.push('/query')
+
+                // 使用 replace 跳转，添加短暂延迟确保 cookie 已设置
+                setTimeout(() => {
+                    router.replace('/query').then(() => {
+                    }).catch(err => {
+                        console.error('Navigation error:', err)
+                    })
+                }, 500)
             } else {
                 ElMessage.error(response.message || '登录失败，请检查用户名和密码')
             }
