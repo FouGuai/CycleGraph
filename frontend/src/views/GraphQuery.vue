@@ -330,7 +330,7 @@
               </el-empty>
             </div>
 
-            <div v-else>
+            <div v-else style="position: relative; width: 100%; height: 600px;">
               <div ref="chartContainer" class="chart-container"></div>
 
             <!-- 右键菜单浮动窗口 -->
@@ -2297,8 +2297,12 @@ onUnmounted(() => {
 
 .chart-container {
   width: 100%;
-  flex: 1;
-  min-height: 500px;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 .empty-state {
