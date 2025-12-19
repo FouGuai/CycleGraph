@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from server.opengauss.graph_dao import execute_dml, fetch_all, fetch_one, Vertex, Edge
 
 import server.core.bibfs as cycle_ag
+import server.core.membibfs as mem_cycle_ag
 
 
 # ==================== Vertex 操作 ====================
@@ -217,7 +218,7 @@ def insert_edge(
     eid: int,
     src_vid: int,
     dst_vid: int,
-    amount: int,
+    amount : int,
     occur_time: Optional[int] = None,
     e_type: int = 0,
     create_vertices: bool = False,
@@ -241,10 +242,10 @@ def insert_edge(
                 "message": "Destination vertex ID must be a positive integer",
             }
 
-        if not isinstance(amount, int) or amount <= 0:
+        if not isinstance(amount, int) or amount < 0:
             return {"status": "error", "message": "Amount must be a positive integer"}
 
-        if occur_time is not None and occur_time <= 0:
+        if occur_time is not None and occur_time < 0:
             return {
                 "status": "error",
                 "message": "Occur time must be a positive integer",
@@ -344,8 +345,14 @@ def query_cycles(
     limit: int = 10,
     allow_duplicate_vertices: bool = False,
     allow_duplicate_edges: bool = False,
+    use_memory: bool = True,
 ) -> Dict[str, Any]:
-    """查询环路。"""
+    """查询环路。
+    
+    Args:
+        use_memory: 是否使用内存版本(默认True)。内存版本会先加载数据到内存，
+                   适合数据库访问较慢的场景；False则使用数据库临时表版本。
+    """
     # 验证输入
     if not isinstance(start_vid, int) or start_vid <= 0:
         return {
@@ -399,19 +406,35 @@ def query_cycles(
             "message": "Limit cannot exceed 1000 for performance reasons",
         }
 
-    return cycle_ag.query_cycles(
-        start_vid,
-        max_depth,
-        direction,
-        vertex_filter_v_type,
-        vertex_filter_min_balance,
-        edge_filter_e_type,
-        edge_filter_min_amount,
-        edge_filter_max_amount,
-        limit,
-        allow_duplicate_vertices,
-        allow_duplicate_edges,
-    )
+    # 根据参数选择使用哪个版本
+    if use_memory:
+        return mem_cycle_ag.query_cycles(
+            start_vid,
+            max_depth,
+            direction,
+            vertex_filter_v_type,
+            vertex_filter_min_balance,
+            edge_filter_e_type,
+            edge_filter_min_amount,
+            edge_filter_max_amount,
+            limit,
+            allow_duplicate_vertices,
+            allow_duplicate_edges,
+        )
+    else:
+        return cycle_ag.query_cycles(
+            start_vid,
+            max_depth,
+            direction,
+            vertex_filter_v_type,
+            vertex_filter_min_balance,
+            edge_filter_e_type,
+            edge_filter_min_amount,
+            edge_filter_max_amount,
+            limit,
+            allow_duplicate_vertices,
+            allow_duplicate_edges,
+        )
 
 
 # 在文件末尾添加删除函数

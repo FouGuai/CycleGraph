@@ -503,15 +503,17 @@ cgql insert edge --eid <id> --src <vid> --dst <vid> --amt <amount> [选项]
 ```
 
 **参数 (必需):**
-- `--eid <int>`: 边ID
+
 - `--src <int>`: 源点ID
 - `--dst <int>`: 目标点ID
-- `--amt <int>`: 交易金额
+
 
 **参数 (可选):**
 - `--time <int>`: 发生时间 Unix时间戳 (默认当前时间)
 - `--et, --e-type <str>`: 边类型 (默认 `"+"`)
 - `--create-v`: 自动创建不存在的源点和目标点
+- `--amt <int>`: 交易金额
+- `--eid <int>`: 边ID
 
 **示例 1: 基本插入**
 ```bash

@@ -148,69 +148,96 @@ def _bidirectional_bfs(
     _init_search(bwd_table, start_vid, **db_kwargs)
 
     cycles = []
-    current_depth = 1
+    seen_cycles: Set[Tuple[int, ...]] = set()  # 动态去重
+    current_depth = 0
 
-    while current_depth <= max_depth // 2 and len(cycles) < limit:
-        # 正向扩展
-        fwd_count = _expand_forward(
-            fwd_table,
-            direction,
-            edge_filter_e_types,
-            edge_filter_min_amount,
-            edge_filter_max_amount,
-            vertex_filter_v_types,
-            vertex_filter_min_balance,
-            **db_kwargs,
-        )
-
-        if fwd_count == 0:
+    while current_depth < max_depth // 2 and len(cycles) < limit:
+        # 优化：选择较小的表扩展
+        fwd_count = _get_table_count(fwd_table, current_depth, **db_kwargs)
+        bwd_count = _get_table_count(bwd_table, current_depth, **db_kwargs)
+        
+        if fwd_count == 0 and bwd_count == 0:
             break
-
-        # 检查碰撞
-        new_cycles = _detect_cycles(
-            fwd_table,
-            bwd_table,
-            start_vid,
-            allow_duplicate_vertices,
-            allow_duplicate_edges,
-            limit - len(cycles),
-            **db_kwargs,
-        )
-        cycles.extend(new_cycles)
-
-        if len(cycles) >= limit:
-            break
-
-        # 反向扩展
-        bwd_count = _expand_backward(
-            bwd_table,
-            direction,
-            edge_filter_e_types,
-            edge_filter_min_amount,
-            edge_filter_max_amount,
-            vertex_filter_v_types,
-            vertex_filter_min_balance,
-            **db_kwargs,
-        )
-
-        if bwd_count == 0:
-            break
-
-        # 再次检查碰撞
-        new_cycles = _detect_cycles(
-            fwd_table,
-            bwd_table,
-            start_vid,
-            allow_duplicate_vertices,
-            allow_duplicate_edges,
-            limit - len(cycles),
-            **db_kwargs,
-        )
-        cycles.extend(new_cycles)
-
+        
         current_depth += 1
+        
+        if fwd_count <= bwd_count or bwd_count == 0:
+            # 正向扩展
+            expand_count = _expand_forward(
+                fwd_table,
+                bwd_table,
+                direction,
+                edge_filter_e_types,
+                edge_filter_min_amount,
+                edge_filter_max_amount,
+                vertex_filter_v_types,
+                vertex_filter_min_balance,
+                **db_kwargs,
+            )
+
+            if expand_count == 0:
+                break
+
+            # 检查正向新扩展节点与反向的碰撞
+            new_cycles = _detect_cycles(
+                fwd_table,
+                bwd_table,
+                start_vid,
+                current_depth,
+                allow_duplicate_vertices,
+                allow_duplicate_edges,
+                limit - len(cycles),
+                seen_cycles,
+                **db_kwargs,
+            )
+            cycles.extend(new_cycles)
+
+            if len(cycles) >= limit:
+                break
+        else:
+            # 反向扩展
+            expand_count = _expand_backward(
+                bwd_table,
+                fwd_table,
+                direction,
+                edge_filter_e_types,
+                edge_filter_min_amount,
+                edge_filter_max_amount,
+                vertex_filter_v_types,
+                vertex_filter_min_balance,
+                **db_kwargs,
+            )
+
+            if expand_count == 0:
+                break
+
+            # 检查反向新扩展节点与正向的碰撞
+            new_cycles = _detect_cycles(
+                bwd_table,
+                fwd_table,
+                start_vid,
+                current_depth,
+                allow_duplicate_vertices,
+                allow_duplicate_edges,
+                limit - len(cycles),
+                seen_cycles,
+                **db_kwargs,
+            )
+            cycles.extend(new_cycles)
+
+            if len(cycles) >= limit:
+                break
 
     return cycles
+
+
+def _get_table_count(table_name: str, depth: int, **db_kwargs: Any) -> int:
+    """获取表中指定深度的记录数。"""
+    result = fetch_one(
+        f"SELECT COUNT(*) FROM {table_name} WHERE depth = {depth}",
+        **db_kwargs
+    )
+    return result[0] if result else 0
 
 
 def _create_temp_table(table_name: str, **db_kwargs: Any) -> None:
@@ -243,6 +270,7 @@ def _init_search(table_name: str, start_vid: int, **db_kwargs: Any) -> None:
 
 def _expand_forward(
     table_name: str,
+    opposite_table: str,
     direction: str,
     edge_filter_e_types: Optional[List[str]],
     edge_filter_min_amount: Optional[int],
@@ -301,7 +329,8 @@ def _expand_forward(
     {vertex_join}
     WHERE t.depth = {current_max_depth}
       AND {where_clause}
-      AND NOT (e.dst_vid = ANY(t.path_vids));
+      AND NOT (e.dst_vid = ANY(t.path_vids))
+      AND NOT EXISTS (SELECT 1 FROM {opposite_table} o WHERE o.vid = e.dst_vid);
     """
 
     return execute_dml(sql, **db_kwargs)
@@ -309,6 +338,7 @@ def _expand_forward(
 
 def _expand_backward(
     table_name: str,
+    opposite_table: str,
     direction: str,
     edge_filter_e_types: Optional[List[str]],
     edge_filter_min_amount: Optional[int],
@@ -367,7 +397,8 @@ def _expand_backward(
     {vertex_join}
     WHERE t.depth = {current_max_depth}
       AND {where_clause}
-      AND NOT (e.src_vid = ANY(t.path_vids));
+      AND NOT (e.src_vid = ANY(t.path_vids))
+      AND NOT EXISTS (SELECT 1 FROM {opposite_table} o WHERE o.vid = e.src_vid);
     """
 
     return execute_dml(sql, **db_kwargs)
@@ -377,13 +408,15 @@ def _detect_cycles(
     fwd_table: str,
     bwd_table: str,
     start_vid: int,
+    current_depth: int,
     allow_duplicate_vertices: bool,
     allow_duplicate_edges: bool,
     remaining_limit: int,
+    seen_cycles: Set[Tuple[int, ...]],
     **db_kwargs: Any,
 ) -> List[List[Tuple[int, int, int]]]:
-    """检测两个方向的碰撞,找出环路。"""
-    # 找到碰撞点
+    """检测当前深度新扩展节点与对侧的碰撞。"""
+    # 只检查当前深度新扩展的节点与对侧的碰撞
     sql = f"""
     SELECT 
         f.vid as meet_vid,
@@ -394,7 +427,8 @@ def _detect_cycles(
     FROM {fwd_table} f
     JOIN {bwd_table} b ON f.vid = b.vid
     WHERE f.vid != {start_vid}
-    LIMIT {remaining_limit};
+      AND f.depth = {current_depth}
+    LIMIT {remaining_limit * 5};
     """
 
     collisions = fetch_all(sql, **db_kwargs)
@@ -431,12 +465,25 @@ def _detect_cycles(
         if _validate_cycle(
             full_cycle, start_vid, allow_duplicate_vertices, allow_duplicate_edges
         ):
-            cycles.append(full_cycle)
+            # 动态去重
+            signature = _get_cycle_signature(full_cycle)
+            if signature not in seen_cycles:
+                seen_cycles.add(signature)
+                cycles.append(full_cycle)
 
-            if len(cycles) >= remaining_limit:
-                break
+                if len(cycles) >= remaining_limit:
+                    break
 
     return cycles
+
+
+def _get_cycle_signature(cycle: List[Tuple[int, int, int]]) -> Tuple[int, ...]:
+    """生成环路的唯一签名，用于去重。
+    
+    使用排序后的边ID作为环的唯一标识，因为一个环由其包含的边集合唯一确定。
+    """
+    edge_ids = tuple(sorted([eid for _, _, eid in cycle]))
+    return edge_ids
 
 
 def _validate_cycle(

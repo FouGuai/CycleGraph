@@ -6,7 +6,8 @@
 import argparse
 import json
 import sys
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any, Callable, Optional
+from dataclasses import dataclass, field
 
 from server.core.auth_service import register_user, login_user
 from server.core.graph_service import (
@@ -20,7 +21,572 @@ from server.core.graph_service import (
 )
 
 
-def build_parser():
+# ==================== 命令配置数据结构 ====================
+
+
+@dataclass
+class Argument:
+    """参数定义"""
+
+    flags: List[str]  # 参数标志，如 ['--username', '-u']
+    help: str  # 帮助信息
+    required: bool = False
+    type: Optional[type] = None
+    default: Any = None
+    action: Optional[str] = None
+    nargs: Optional[str] = None
+    choices: Optional[List[str]] = None
+    dest: Optional[str] = None
+
+
+@dataclass
+class Command:
+    """命令定义"""
+
+    name: str  # 命令名称
+    aliases: List[str] = field(default_factory=list)  # 命令别名
+    help: str = ""  # 帮助信息
+    arguments: List[Argument] = field(default_factory=list)  # 参数列表
+    handler: Optional[Callable] = None  # 处理函数
+    subcommands: List["Command"] = field(default_factory=list)  # 子命令
+
+
+# ==================== 命令处理器 ====================
+
+
+def handle_register(args) -> Dict[str, Any]:
+    """处理注册命令"""
+    return register_user(args.username, args.password)
+
+
+def handle_login(args) -> Dict[str, Any]:
+    """处理登录命令"""
+    result = login_user(args.username, args.password)
+    if result["status"] != "success":
+        return {"status": result["status"], "message": result.get("message", "")}
+    return {"status": result["status"], "token": result.get("token", "")}
+
+
+def handle_logout(args) -> Dict[str, Any]:
+    """处理登出命令"""
+    return {"status": "success", "message": "Logged out and session cleared."}
+
+
+def handle_whoami(args) -> Dict[str, Any]:
+    """处理查看当前用户命令"""
+    return {
+        "status": "error",
+        "message": "This command should be handled by server",
+    }
+
+
+def handle_connect(args) -> Dict[str, Any]:
+    """处理连接命令"""
+    return {
+        "status": "success",
+        "message": f"Successfully connected to {args.host}. Session configuration saved.",
+    }
+
+
+def handle_query_vertex(args) -> Dict[str, Any]:
+    """处理查询点命令"""
+    return query_vertices(
+        vid=args.vid,
+        v_types=args.v_type,
+        min_create_time=args.min_time,
+        max_create_time=args.max_time,
+        min_balance=args.min_balance,
+        max_balance=args.max_balance,
+    )
+
+
+def handle_query_edge(args) -> Dict[str, Any]:
+    """处理查询边命令"""
+    return query_edges(
+        eid=args.eid,
+        src_vid=args.src_vid,
+        dst_vid=args.dst_vid,
+        e_types=args.e_type,
+        min_amount=args.min_amount,
+        max_amount=args.max_amount,
+        min_occur_time=args.min_occur_time,
+        max_occur_time=args.max_occur_time,
+    )
+
+
+def handle_query_cycle(args) -> Dict[str, Any]:
+    """处理查询环路命令"""
+    kwargs = {
+        "start_vid": args.start_vid,
+        "max_depth": args.max_depth,
+        "direction": args.direction,
+        "limit": args.limit,
+        "allow_duplicate_vertices": args.allow_duplicate_vertices,
+        "allow_duplicate_edges": args.allow_duplicate_edges,
+    }
+
+    # 添加可选的过滤参数
+    optional_params = [
+        ("vertex_filter_v_type", "vertex_filter_v_type"),
+        ("vertex_filter_min_balance", "vertex_filter_min_balance"),
+        ("edge_filter_e_type", "edge_filter_e_type"),
+        ("edge_filter_min_amount", "edge_filter_min_amount"),
+        ("edge_filter_max_amount", "edge_filter_max_amount"),
+    ]
+
+    for arg_name, param_name in optional_params:
+        if hasattr(args, arg_name) and getattr(args, arg_name) is not None:
+            kwargs[param_name] = getattr(args, arg_name)
+
+    return query_cycles(**kwargs)
+
+
+def handle_insert_vertex(args) -> Dict[str, Any]:
+    """处理插入点命令"""
+    return insert_vertex(
+        v_type=args.v_type,
+        vid=args.vid,
+        create_time=args.create_time,
+        balance=args.balance,
+    )
+
+
+def handle_insert_edge(args) -> Dict[str, Any]:
+    """处理插入边命令"""
+    return insert_edge(
+        eid=args.eid,
+        src_vid=args.src_vid,
+        dst_vid=args.dst_vid,
+        amount=args.amount,
+        occur_time=args.occur_time,
+        e_type=args.e_type,
+        create_vertices=args.create_vertices,
+    )
+
+
+def handle_delete_vertex(args) -> Dict[str, Any]:
+    """处理删除点命令"""
+    return delete_vertex(vid=args.vid)
+
+
+def handle_delete_edge(args) -> Dict[str, Any]:
+    """处理删除边命令"""
+    return delete_edge(eid=args.eid)
+
+
+# ==================== 命令定义 ====================
+
+
+def get_command_tree() -> List[Command]:
+    """获取命令树配置"""
+
+    # 公共参数定义
+    username_arg = Argument(
+        flags=["--username", "-u"], help="用户名", required=True, type=str
+    )
+    password_arg = Argument(
+        flags=["--password", "-p"], help="密码", required=True, type=str
+    )
+
+    # 点过滤参数
+    vid_arg = Argument(flags=["--vid"], help="点 ID", type=int)
+    v_type_arg = Argument(
+        flags=["--vt", "--v-type"], help="点类型", type=str, nargs="+", dest="v_type"
+    )
+    min_balance_arg = Argument(
+        flags=["--min-bal", "--min-balance"],
+        help="最小余额",
+        type=int,
+        dest="min_balance",
+    )
+    max_balance_arg = Argument(
+        flags=["--max-bal", "--max-balance"],
+        help="最大余额",
+        type=int,
+        dest="max_balance",
+    )
+    min_time_arg = Argument(flags=["--min-time"], help="最小创建时间", type=int)
+    max_time_arg = Argument(flags=["--max-time"], help="最大创建时间", type=int)
+
+    # 边过滤参数
+    eid_arg = Argument(flags=["--eid"], help="边 ID", type=int)
+    src_vid_arg = Argument(
+        flags=["--src", "--src-vid"], help="源点 ID", type=int, dest="src_vid"
+    )
+    dst_vid_arg = Argument(
+        flags=["--dst", "--dst-vid"], help="目标点 ID", type=int, dest="dst_vid"
+    )
+    e_type_arg = Argument(
+        flags=["--et", "--e-type"], help="边类型", type=str, nargs="+", dest="e_type"
+    )
+    min_amount_arg = Argument(
+        flags=["--min-amt", "--min-amount"],
+        help="最小交易金额",
+        type=int,
+        dest="min_amount",
+    )
+    max_amount_arg = Argument(
+        flags=["--max-amt", "--max-amount"],
+        help="最大交易金额",
+        type=int,
+        dest="max_amount",
+    )
+    min_occur_time_arg = Argument(
+        flags=["--min-time"], help="最小发生时间", type=int, dest="min_occur_time"
+    )
+    max_occur_time_arg = Argument(
+        flags=["--max-time"], help="最大发生时间", type=int, dest="max_occur_time"
+    )
+
+    return [
+        # ==================== 认证命令 ====================
+        Command(
+            name="register",
+            help="注册新用户",
+            arguments=[username_arg, password_arg],
+            handler=handle_register,
+        ),
+        Command(
+            name="login",
+            help="用户登录",
+            arguments=[username_arg, password_arg],
+            handler=handle_login,
+        ),
+        Command(name="logout", help="登出并清除会话", handler=handle_logout),
+        Command(name="whoami", help="查看当前登录用户", handler=handle_whoami),
+        # ==================== 连接命令 ====================
+        Command(
+            name="connect",
+            help="连接到服务器",
+            arguments=[
+                Argument(
+                    flags=["host"],
+                    help="服务器地址 (例如: http://127.0.0.1:8000)",
+                    type=str,
+                )
+            ],
+            handler=handle_connect,
+        ),
+        # ==================== 查询命令 ====================
+        Command(
+            name="query",
+            aliases=["q"],
+            help="查询数据",
+            subcommands=[
+                Command(
+                    name="vertex",
+                    aliases=["v"],
+                    help="查询点",
+                    arguments=[
+                        vid_arg,
+                        v_type_arg,
+                        min_time_arg,
+                        max_time_arg,
+                        min_balance_arg,
+                        max_balance_arg,
+                    ],
+                    handler=handle_query_vertex,
+                ),
+                Command(
+                    name="edge",
+                    aliases=["e"],
+                    help="查询边",
+                    arguments=[
+                        eid_arg,
+                        src_vid_arg,
+                        dst_vid_arg,
+                        e_type_arg,
+                        min_amount_arg,
+                        max_amount_arg,
+                        min_occur_time_arg,
+                        max_occur_time_arg,
+                    ],
+                    handler=handle_query_edge,
+                ),
+                Command(
+                    name="cycle",
+                    aliases=["c"],
+                    help="查询环路",
+                    arguments=[
+                        Argument(
+                            flags=["--start", "--start-vid"],
+                            help="起始点 ID",
+                            required=True,
+                            type=int,
+                            dest="start_vid",
+                        ),
+                        Argument(
+                            flags=["--depth", "--max-depth"],
+                            help="最大深度",
+                            required=True,
+                            type=int,
+                            dest="max_depth",
+                        ),
+                        Argument(
+                            flags=["--dir", "--direction"],
+                            help="方向 (forward/any)",
+                            type=str,
+                            default="forward",
+                            choices=["forward", "any"],
+                            dest="direction",
+                        ),
+                        # 点过滤
+                        Argument(
+                            flags=["--vt", "--v-type"],
+                            help="点类型过滤",
+                            type=str,
+                            nargs="+",
+                            dest="vertex_filter_v_type",
+                        ),
+                        Argument(
+                            flags=["--min-bal", "--min-balance"],
+                            help="点最小余额过滤",
+                            type=int,
+                            dest="vertex_filter_min_balance",
+                        ),
+                        # 边过滤
+                        Argument(
+                            flags=["--et", "--e-type"],
+                            help="边类型过滤",
+                            type=str,
+                            nargs="+",
+                            dest="edge_filter_e_type",
+                        ),
+                        Argument(
+                            flags=["--min-amt", "--min-amount"],
+                            help="边最小金额过滤",
+                            type=int,
+                            dest="edge_filter_min_amount",
+                        ),
+                        Argument(
+                            flags=["--max-amt", "--max-amount"],
+                            help="边最大金额过滤",
+                            type=int,
+                            dest="edge_filter_max_amount",
+                        ),
+                        # 结果控制
+                        Argument(
+                            flags=["--limit"],
+                            help="最多返回的环路数量",
+                            type=int,
+                            default=10,
+                        ),
+                        Argument(
+                            flags=["--allow-dup-v", "--allow-duplicate-vertices"],
+                            help="允许环路中重复访问同一个点",
+                            action="store_true",
+                            dest="allow_duplicate_vertices",
+                        ),
+                        Argument(
+                            flags=["--allow-dup-e", "--allow-duplicate-edges"],
+                            help="允许环路中重复使用同一条边",
+                            action="store_true",
+                            dest="allow_duplicate_edges",
+                        ),
+                    ],
+                    handler=handle_query_cycle,
+                ),
+            ],
+        ),
+        # ==================== 插入命令 ====================
+        Command(
+            name="insert",
+            aliases=["i"],
+            help="插入数据",
+            subcommands=[
+                Command(
+                    name="vertex",
+                    aliases=["v"],
+                    help="插入点",
+                    arguments=[
+                        Argument(
+                            flags=["--vt", "--v-type"],
+                            help="点类型",
+                            required=True,
+                            type=str,
+                            dest="v_type",
+                        ),
+                        Argument(
+                            flags=["--vid"],
+                            help="点 ID (可选，默认自动生成)",
+                            type=int,
+                        ),
+                        Argument(
+                            flags=["--time", "--create-time"],
+                            help="创建时间 (Unix 时间戳)",
+                            type=int,
+                            dest="create_time",
+                        ),
+                        Argument(
+                            flags=["--bal", "--balance"],
+                            help="初始余额",
+                            type=int,
+                            default=0,
+                            dest="balance",
+                        ),
+                    ],
+                    handler=handle_insert_vertex,
+                ),
+                Command(
+                    name="edge",
+                    aliases=["e"],
+                    help="插入边",
+                    arguments=[
+                        Argument(
+                            flags=["--eid"], help="边 ID", type=int
+                        ),
+                        Argument(
+                            flags=["--src", "--src-vid"],
+                            help="源点 ID",
+                            required=True,
+                            type=int,
+                            dest="src_vid",
+                        ),
+                        Argument(
+                            flags=["--dst", "--dst-vid"],
+                            help="目标点 ID",
+                            required=True,
+                            type=int,
+                            dest="dst_vid",
+                        ),
+                        Argument(
+                            flags=["--amt", "--amount"],
+                            help="交易金额",
+                            type=int,
+                            default=0,
+                            dest="amount",
+                        ),
+                        Argument(
+                            flags=["--time", "--occur-time"],
+                            help="发生时间 (Unix 时间戳)",
+                            type=int,
+                            dest="occur_time",
+                        ),
+                        Argument(
+                            flags=["--et", "--e-type"],
+                            help="边类型",
+                            type=str,
+                            default="+",
+                            dest="e_type",
+                        ),
+                        Argument(
+                            flags=["--create-v", "--create-vertices"],
+                            help="自动创建不存在的点",
+                            action="store_true",
+                            dest="create_vertices",
+                        ),
+                    ],
+                    handler=handle_insert_edge,
+                ),
+            ],
+        ),
+        # ==================== 删除命令 ====================
+        Command(
+            name="delete",
+            aliases=["d"],
+            help="删除数据",
+            subcommands=[
+                Command(
+                    name="vertex",
+                    aliases=["v"],
+                    help="删除点",
+                    arguments=[
+                        Argument(
+                            flags=["--vid"],
+                            help="要删除的点 ID",
+                            required=True,
+                            type=int,
+                        )
+                    ],
+                    handler=handle_delete_vertex,
+                ),
+                Command(
+                    name="edge",
+                    aliases=["e"],
+                    help="删除边",
+                    arguments=[
+                        Argument(
+                            flags=["--eid"],
+                            help="要删除的边 ID",
+                            required=True,
+                            type=int,
+                        )
+                    ],
+                    handler=handle_delete_edge,
+                ),
+            ],
+        ),
+    ]
+
+
+# ==================== 解析器构建 ====================
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """根据命令树配置构建解析器"""
+    parser = argparse.ArgumentParser(
+        prog="cgql",
+        description="CycleGraph Query Language - 图数据库命令行工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="可用命令")
+
+    command_tree = get_command_tree()
+    _add_commands_to_parser(subparsers, command_tree)
+
+    return parser
+
+
+def _add_commands_to_parser(
+    subparsers: argparse._SubParsersAction, commands: List[Command]
+) -> None:
+    """递归添加命令到解析器"""
+    for cmd in commands:
+        # 创建子命令解析器
+        cmd_parser = subparsers.add_parser(
+            cmd.name, aliases=cmd.aliases, help=cmd.help
+        )
+
+        # 添加参数
+        for arg in cmd.arguments:
+            kwargs = {"help": arg.help}
+            if arg.required:
+                kwargs["required"] = True
+            if arg.type:
+                kwargs["type"] = arg.type
+            if arg.default is not None:
+                kwargs["default"] = arg.default
+            if arg.action:
+                kwargs["action"] = arg.action
+            if arg.nargs:
+                kwargs["nargs"] = arg.nargs
+            if arg.choices:
+                kwargs["choices"] = arg.choices
+            if arg.dest:
+                kwargs["dest"] = arg.dest
+
+            cmd_parser.add_argument(*arg.flags, **kwargs)
+
+        # 如果有子命令，递归添加
+        if cmd.subcommands:
+            sub_subparsers = cmd_parser.add_subparsers(
+                dest=f"{cmd.name}_type", help="子命令类型"
+            )
+            _add_commands_to_parser(sub_subparsers, cmd.subcommands)
+
+        # 设置处理器
+        if cmd.handler:
+            cmd_parser.set_defaults(handler=cmd.handler)
+
+
+# ==================== 命令执行 ====================
+
+
+_PARSER = build_parser()
+
+
+def execute_command(args_list: List[str]) -> Dict[str, Any]:
     """执行 CLI 命令并返回结果字典。
 
     Args:
@@ -29,386 +595,19 @@ def build_parser():
     Returns:
         Dict: 执行结果的字典
     """
-    parser = argparse.ArgumentParser(
-        prog="cgql", description="CycleGraph Query Language - 图数据库命令行工具"
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="子命令")
-
-    # ==================== 用户认证命令 ====================
-
-    # register
-    parser_register = subparsers.add_parser("register", help="注册新用户")
-    parser_register.add_argument("--username", "-u", required=True, help="用户名")
-    parser_register.add_argument("--password", "-p", required=True, help="密码")
-
-    # login
-    parser_login = subparsers.add_parser("login", help="用户登录")
-    parser_login.add_argument("--username", "-u", required=True, help="用户名")
-    parser_login.add_argument("--password", "-p", required=True, help="密码")
-
-    # logout
-    parser_logout = subparsers.add_parser("logout", help="登出并清除会话")
-
-    # whoami
-    parser_whoami = subparsers.add_parser("whoami", help="查看当前登录用户")
-
-    # ==================== 连接管理命令 ====================
-
-    # connect
-    parser_connect = subparsers.add_parser("connect", help="连接到服务器")
-    parser_connect.add_argument("host", help="服务器地址 (例如: http://127.0.0.1:8000)")
-
-    # ==================== 查询命令 ====================
-
-    parser_query = subparsers.add_parser("query", aliases=["q"], help="查询数据")
-    query_subparsers = parser_query.add_subparsers(dest="query_type", help="查询类型")
-
-    # query vertex
-    parser_query_vertex = query_subparsers.add_parser(
-        "vertex", aliases=["v"], help="查询点"
-    )
-    parser_query_vertex.add_argument("--vid", type=int, help="点 ID")
-    parser_query_vertex.add_argument(
-        "--vt", "--v-type", type=str, nargs="+", dest="v_type", help="点类型"
-    )
-    parser_query_vertex.add_argument("--min-time", type=int, help="最小创建时间")
-    parser_query_vertex.add_argument("--max-time", type=int, help="最大创建时间")
-    parser_query_vertex.add_argument(
-        "--min-bal", "--min-balance", type=int, dest="min_balance", help="最小余额"
-    )
-    parser_query_vertex.add_argument(
-        "--max-bal", "--max-balance", type=int, dest="max_balance", help="最大余额"
-    )
-
-    # query edge
-    parser_query_edge = query_subparsers.add_parser(
-        "edge", aliases=["e"], help="查询边"
-    )
-    parser_query_edge.add_argument("--eid", type=int, help="边 ID")
-    parser_query_edge.add_argument(
-        "--src", "--src-vid", type=int, dest="src_vid", help="源点 ID"
-    )
-    parser_query_edge.add_argument(
-        "--dst", "--dst-vid", type=int, dest="dst_vid", help="目标点 ID"
-    )
-    parser_query_edge.add_argument(
-        "--et", "--e-type", type=str, nargs="+", dest="e_type", help="边类型"
-    )
-    parser_query_edge.add_argument(
-        "--min-amt", "--min-amount", type=int, dest="min_amount", help="最小交易金额"
-    )
-    parser_query_edge.add_argument(
-        "--max-amt", "--max-amount", type=int, dest="max_amount", help="最大交易金额"
-    )
-    parser_query_edge.add_argument(
-        "--min-time", type=int, dest="min_occur_time", help="最小发生时间"
-    )
-    parser_query_edge.add_argument(
-        "--max-time", type=int, dest="max_occur_time", help="最大发生时间"
-    )
-
-    # query cycle
-    parser_query_cycle = query_subparsers.add_parser(
-        "cycle", aliases=["c"], help="查询环路"
-    )
-    parser_query_cycle.add_argument(
-        "--start",
-        "--start-vid",
-        type=int,
-        required=True,
-        dest="start_vid",
-        help="起始点 ID",
-    )
-    parser_query_cycle.add_argument(
-        "--depth",
-        "--max-depth",
-        type=int,
-        required=True,
-        dest="max_depth",
-        help="最大深度",
-    )
-    parser_query_cycle.add_argument(
-        "--dir",
-        "--direction",
-        choices=["forward", "any"],
-        default="forward",
-        dest="direction",
-        help="方向",
-    )
-    # 点过滤参数
-    parser_query_cycle.add_argument(
-        "--vt",
-        "--v-type",
-        type=str,
-        nargs="+",
-        dest="vertex_filter_v_type",
-        help="点类型过滤",
-    )
-    parser_query_cycle.add_argument(
-        "--min-bal",
-        "--min-balance",
-        type=int,
-        dest="vertex_filter_min_balance",
-        help="点最小余额过滤",
-    )
-    # 边过滤参数
-    parser_query_cycle.add_argument(
-        "--et",
-        "--e-type",
-        type=str,
-        nargs="+",
-        dest="edge_filter_e_type",
-        help="边类型过滤",
-    )
-    parser_query_cycle.add_argument(
-        "--min-amt",
-        "--min-amount",
-        type=int,
-        dest="edge_filter_min_amount",
-        help="边最小金额过滤",
-    )
-    parser_query_cycle.add_argument(
-        "--max-amt",
-        "--max-amount",
-        type=int,
-        dest="edge_filter_max_amount",
-        help="边最大金额过滤",
-    )
-    # 结果控制参数
-    parser_query_cycle.add_argument(
-        "--limit", type=int, default=10, help="最多返回的环路数量"
-    )
-    parser_query_cycle.add_argument(
-        "--allow-dup-v",
-        "--allow-duplicate-vertices",
-        action="store_true",
-        dest="allow_duplicate_vertices",
-        help="允许环路中重复访问同一个点",
-    )
-    parser_query_cycle.add_argument(
-        "--allow-dup-e",
-        "--allow-duplicate-edges",
-        action="store_true",
-        dest="allow_duplicate_edges",
-        help="允许环路中重复使用同一条边",
-    )
-
-    # ==================== 插入命令 ====================
-
-    parser_insert = subparsers.add_parser("insert", aliases=["i"], help="插入数据")
-    insert_subparsers = parser_insert.add_subparsers(
-        dest="insert_type", help="插入类型"
-    )
-
-    # insert vertex
-    parser_insert_vertex = insert_subparsers.add_parser(
-        "vertex", aliases=["v"], help="插入点"
-    )
-    parser_insert_vertex.add_argument(
-        "--vt", "--v-type", type=str, required=True, dest="v_type", help="点类型"
-    )
-    parser_insert_vertex.add_argument(
-        "--vid", type=int, help="点 ID (可选，默认自动生成)"
-    )
-    parser_insert_vertex.add_argument(
-        "--time",
-        "--create-time",
-        type=int,
-        dest="create_time",
-        help="创建时间 (Unix 时间戳)",
-    )
-    parser_insert_vertex.add_argument(
-        "--bal", "--balance", type=int, default=0, dest="balance", help="初始余额"
-    )
-
-    # insert edge
-    parser_insert_edge = insert_subparsers.add_parser(
-        "edge", aliases=["e"], help="插入边"
-    )
-    parser_insert_edge.add_argument("--eid", type=int, required=True, help="边 ID")
-    parser_insert_edge.add_argument(
-        "--src", "--src-vid", type=int, required=True, dest="src_vid", help="源点 ID"
-    )
-    parser_insert_edge.add_argument(
-        "--dst", "--dst-vid", type=int, required=True, dest="dst_vid", help="目标点 ID"
-    )
-    parser_insert_edge.add_argument(
-        "--amt", "--amount", type=int, required=True, dest="amount", help="交易金额"
-    )
-    parser_insert_edge.add_argument(
-        "--time",
-        "--occur-time",
-        type=int,
-        dest="occur_time",
-        help="发生时间 (Unix 时间戳)",
-    )
-    parser_insert_edge.add_argument(
-        "--et", "--e-type", type=str, default="+", dest="e_type", help="边类型"
-    )
-    parser_insert_edge.add_argument(
-        "--create-v",
-        "--create-vertices",
-        action="store_true",
-        dest="create_vertices",
-        help="自动创建不存在的点",
-    )
-
-    parser_delete = subparsers.add_parser("delete", aliases=["d"], help="删除数据")
-    delete_subparsers = parser_delete.add_subparsers(
-        dest="delete_type", help="删除类型"
-    )
-
-    # delete vertex
-    parser_delete_vertex = delete_subparsers.add_parser(
-        "vertex", aliases=["v"], help="删除点"
-    )
-    parser_delete_vertex.add_argument(
-        "--vid", type=int, required=True, help="要删除的点 ID"
-    )
-
-    # delete edge
-    parser_delete_edge = delete_subparsers.add_parser(
-        "edge", aliases=["e"], help="删除边"
-    )
-    parser_delete_edge.add_argument(
-        "--eid", type=int, required=True, help="要删除的边 ID"
-    )
-
-    return parser
-
-
-_PARSER = build_parser()
-
-
-def execute_command(args_list: List[str]) -> Dict[str, Any]:  # type: ignore
-
     try:
         args = _PARSER.parse_args(args_list)
     except SystemExit:
         return {"status": "error", "message": "Invalid command or arguments"}
 
-    # 处理命令
-    if args.command == "register":
-        result = register_user(args.username, args.password)
-        return result
-
-    elif args.command == "login":
-        result = login_user(args.username, args.password)
-        if result["status"] != "success":
-            return {"status": result["status"], "message": result.get("message", "")}
-        return {"status": result["status"], "token": result.get("token", "")}
-
-    elif args.command == "logout":
-        return {"status": "success", "message": "Logged out and session cleared."}
-
-    elif args.command == "whoami":
-        # whoami需要在服务器端通过token验证
-        return {
-            "status": "error",
-            "message": "This command should be handled by server",
-        }
-
-    elif args.command == "connect":
-        return {
-            "status": "success",
-            "message": f"Successfully connected to {args.host}. Session configuration saved.",
-        }
-
-    elif args.command == "query":
-        # 查询操作的登录验证由服务器端处理
-        if args.query_type == "vertex":
-            result = query_vertices(
-                vid=args.vid,
-                v_types=args.v_type,
-                min_create_time=args.min_time,
-                max_create_time=args.max_time,
-                min_balance=args.min_balance,
-                max_balance=args.max_balance,
-            )
-            return result
-
-        elif args.query_type == "edge":
-            result = query_edges(
-                eid=args.eid,
-                src_vid=args.src_vid,
-                dst_vid=args.dst_vid,
-                e_types=args.e_type,
-                min_amount=args.min_amount,
-                max_amount=args.max_amount,
-                min_occur_time=args.min_occur_time,
-                max_occur_time=args.max_occur_time,
-            )
-            return result
-
-        elif args.query_type == "cycle":
-            # 构建过滤参数
-            kwargs = {
-                "start_vid": args.start_vid,
-                "max_depth": args.max_depth,
-                "direction": args.direction,
-            }
-
-            # 添加可选参数
-            if hasattr(args, "vertex_filter_v_type") and args.vertex_filter_v_type:
-                kwargs["vertex_filter_v_type"] = args.vertex_filter_v_type
-            if (
-                hasattr(args, "vertex_filter_min_balance")
-                and args.vertex_filter_min_balance
-            ):
-                kwargs["vertex_filter_min_balance"] = args.vertex_filter_min_balance
-            if hasattr(args, "edge_filter_e_type") and args.edge_filter_e_type:
-                kwargs["edge_filter_e_type"] = args.edge_filter_e_type
-            if hasattr(args, "edge_filter_min_amount") and args.edge_filter_min_amount:
-                kwargs["edge_filter_min_amount"] = args.edge_filter_min_amount
-            if hasattr(args, "edge_filter_max_amount") and args.edge_filter_max_amount:
-                kwargs["edge_filter_max_amount"] = args.edge_filter_max_amount
-            if hasattr(args, "limit") and args.limit:
-                kwargs["limit"] = args.limit
-            if (
-                hasattr(args, "allow_duplicate_vertices")
-                and args.allow_duplicate_vertices
-            ):
-                kwargs["allow_duplicate_vertices"] = args.allow_duplicate_vertices
-            if hasattr(args, "allow_duplicate_edges") and args.allow_duplicate_edges:
-                kwargs["allow_duplicate_edges"] = args.allow_duplicate_edges
-            result = query_cycles(**kwargs)
-            return result
-
-    elif args.command == "insert":
-        # 插入操作的登录验证由服务器端处理
-        if args.insert_type == "vertex":
-
-            result = insert_vertex(
-                v_type=args.v_type,
-                vid=args.vid,
-                create_time=args.create_time,
-                balance=args.balance,
-            )
-            return result
-
-        elif args.insert_type == "edge":
-            result = insert_edge(
-                eid=args.eid,
-                src_vid=args.src_vid,
-                dst_vid=args.dst_vid,
-                amount=args.amount,
-                occur_time=args.occur_time,
-                e_type=args.e_type,
-                create_vertices=args.create_vertices,
-            )
-            return result
-    elif args.command == "delete":
-        # 删除操作的登录验证由服务器端处理
-        if args.delete_type == "vertex":
-            result = delete_vertex(vid=args.vid)
-            return result
-
-        elif args.delete_type == "edge":
-            result = delete_edge(eid=args.eid)
-            return result
-    else:
+    # 检查是否有处理器
+    if not hasattr(args, "handler"):
         return {"status": "error", "message": "Unknown command"}
+
+    try:
+        return args.handler(args)
+    except Exception as e:
+        return {"status": "error", "message": f"Command execution failed: {str(e)}"}
 
 
 def execute_command_from_string(command_str: str) -> str:

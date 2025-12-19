@@ -5,6 +5,7 @@
 
 from typing import Any, List, Optional, Tuple
 from dataclasses import dataclass
+import time
 
 import psycopg2
 
@@ -117,13 +118,17 @@ def execute_ddl(sql: str, **db_kwargs: Any) -> None:
     Raises:
         psycopg2.Error: SQL 执行失败
     """
+    start = time.perf_counter()
     conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()
         cur.execute(sql)
+        end = time.perf_counter()
         conn.commit()
         cur.close()
+
+        print(f"elapsed: {(end - start)*1000:.2f} ms")
     except Exception as e:
         if conn:
             conn.rollback()
@@ -131,6 +136,8 @@ def execute_ddl(sql: str, **db_kwargs: Any) -> None:
     finally:
         if conn:
             conn.close()
+    end = time.perf_counter()
+    print(f"elapsed: {(end - start)*1000:.2f} ms")
 
 
 def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> int:
@@ -144,14 +151,19 @@ def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> i
     Returns:
         int: 受影响的行数
     """
+    start = time.perf_counter()
+    conn = None
     conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()
         cur.execute(sql, params)
         rowcount = cur.rowcount
+        end = time.perf_counter()
         conn.commit()
         cur.close()
+
+        print(f"elapsed: {(end - start)*1000:.2f} ms")
         return rowcount
     except Exception as e:
         if conn:
@@ -160,7 +172,6 @@ def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> i
     finally:
         if conn:
             conn.close()
-
 
 def fetch_all(
     sql: str, params: Optional[Tuple] = None, **db_kwargs: Any
@@ -175,19 +186,25 @@ def fetch_all(
     Returns:
         List[Tuple]: 查询结果列表
     """
+    start = time.perf_counter()
+    conn = None
     conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()
         cur.execute(sql, params)
         results = cur.fetchall()
+        end = time.perf_counter()
         cur.close()
+
+        print(f"elapsed: {(end - start)*1000:.2f} ms")
         return results
     except Exception as e:
         raise Exception(f"查询失败: {sql[:100]}... | 错误: {e}") from e
     finally:
         if conn:
             conn.close()
+
 
 
 def fetch_one(
@@ -203,13 +220,18 @@ def fetch_one(
     Returns:
         Optional[Tuple]: 查询结果的第一行，若无结果返回 None
     """
+    start = time.perf_counter()
+    conn = None
     conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()
         cur.execute(sql, params)
+        end = time.perf_counter()
         result = cur.fetchone()
         cur.close()
+
+        print(f"elapsed: {(end - start)*1000:.2f} ms")
         return result
     except Exception as e:
         raise Exception(f"查询失败: {sql[:100]}... | 错误: {e}") from e
@@ -229,6 +251,7 @@ def execute_batch(sql: str, params_list: List[Tuple], **db_kwargs: Any) -> int:
     Returns:
         int: 总共受影响的行数
     """
+    start = time.perf_counter()
     conn = None
     try:
         conn = connect(**db_kwargs)
@@ -237,8 +260,11 @@ def execute_batch(sql: str, params_list: List[Tuple], **db_kwargs: Any) -> int:
         for params in params_list:
             cur.execute(sql, params)
             total_rows += cur.rowcount
+        end = time.perf_counter()
         conn.commit()
         cur.close()
+
+        print(f"elapsed: {(end - start)*1000:.2f} ms")
         return total_rows
     except Exception as e:
         if conn:
