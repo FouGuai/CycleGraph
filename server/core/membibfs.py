@@ -77,7 +77,7 @@ def query_cycles(
         )
 
         # 4. 执行内存双向BFS搜索
-        cycles = _memory_bidirectional_bfs(
+        cycles, seen_cycles = _memory_bidirectional_bfs(
             start_vid=start_vid,
             max_depth=max_depth,
             direction=direction,
@@ -201,15 +201,15 @@ def _memory_bidirectional_bfs(
     limit: int,
     allow_duplicate_vertices: bool,
     allow_duplicate_edges: bool,
-) -> List[List[Tuple[int, int, int, Edge]]]:
+) -> Tuple[List[List[Tuple[int, int, int, Edge]]], Set[Tuple]]:
     """纯内存双向BFS核心算法。
 
     Returns:
-        List[List[Tuple]]: 环路列表,每个环路是(src_vid, dst_vid, eid, edge_obj)的列表
+        Tuple: (环路列表, 已见环路签名集合)
     """
     # 检查起点是否在图中
     if start_vid not in vertices_map:
-        return []
+        return [], set()
 
     # 正向搜索状态: vid -> (parent_vid, edge, depth, path_vids, path_edges_full, occur_time)
     # path_edges_full 存储完整的 Edge 对象
@@ -226,6 +226,7 @@ def _memory_bidirectional_bfs(
     bwd_frontier = {start_vid}
 
     cycles = []
+    seen_cycles = set()  # 存储已见环路的签名
     current_depth = 1
 
     while current_depth <= max_depth // 2 and len(cycles) < limit:
@@ -253,6 +254,7 @@ def _memory_bidirectional_bfs(
             allow_duplicate_vertices,
             allow_duplicate_edges,
             limit - len(cycles),
+            seen_cycles,
         )
         cycles.extend(new_cycles)
 
@@ -283,12 +285,13 @@ def _memory_bidirectional_bfs(
             allow_duplicate_vertices,
             allow_duplicate_edges,
             limit - len(cycles),
+            seen_cycles,
         )
         cycles.extend(new_cycles)
 
         current_depth += 1
 
-    return cycles
+    return cycles, seen_cycles
 
 
 def _expand_forward_memory(
@@ -398,6 +401,7 @@ def _detect_cycles_memory(
     allow_duplicate_vertices: bool,
     allow_duplicate_edges: bool,
     remaining_limit: int,
+    seen_cycles: Set[Tuple],
 ) -> List[List[Tuple[int, int, int, Edge]]]:
     """检测两个方向的碰撞,找出环路。"""
     cycles = []
@@ -436,7 +440,11 @@ def _detect_cycles_memory(
         if _validate_cycle(
             full_cycle, start_vid, allow_duplicate_vertices, allow_duplicate_edges
         ):
-            cycles.append(full_cycle)
+            # 生成环路签名并检查是否已存在
+            cycle_signature = _get_cycle_signature(full_cycle)
+            if cycle_signature not in seen_cycles:
+                seen_cycles.add(cycle_signature)
+                cycles.append(full_cycle)
 
     return cycles
 
@@ -545,3 +553,43 @@ def _vertex_matches_filter(
     if min_balance is not None and vertex.balance < min_balance:
         return False
     return True
+
+
+def _get_cycle_signature(cycle: List[Tuple[int, int, int, Edge]]) -> Tuple:
+    """生成环路的唯一签名，用于去重。
+    
+    同一个环路，无论从哪个点开始，正向还是反向遍历，都应该生成相同的签名。
+    例如: 1->2->3->1, 2->3->1->2, 3->1->2->3 是同一个环
+          1->2->3->1 和 1->3->2->1 也是同一个环（反向）
+    
+    Args:
+        cycle: 环路，格式为 [(src_vid, dst_vid, eid, edge_obj), ...]
+    
+    Returns:
+        环路的归一化签名
+    """
+    if not cycle:
+        return tuple()
+    
+    # 提取边ID序列
+    edge_ids = [eid for _, _, eid, _ in cycle]
+    
+    # 找到最小边ID的位置，作为归一化起点
+    min_eid = min(edge_ids)
+    min_idx = edge_ids.index(min_eid)
+    
+    # 从最小边ID开始的正向序列
+    normalized_forward = tuple(edge_ids[min_idx:] + edge_ids[:min_idx])
+    
+    # 从最小边ID开始的反向序列
+    # 反向时，从最小边ID位置开始，逆序遍历
+    reversed_sequence = edge_ids[:min_idx+1][::-1] + edge_ids[min_idx+1:][::-1]
+    if reversed_sequence:
+        # 调整使得最小边ID在开头
+        rev_min_idx = reversed_sequence.index(min_eid)
+        normalized_reverse = tuple(reversed_sequence[rev_min_idx:] + reversed_sequence[:rev_min_idx])
+    else:
+        normalized_reverse = tuple()
+    
+    # 返回字典序较小的那个作为唯一签名
+    return min(normalized_forward, normalized_reverse) if normalized_reverse else normalized_forward
