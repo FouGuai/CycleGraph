@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Home from '../views/Home.vue'
 import Login from '../views/Login.vue'
 
 const routes = [
@@ -8,15 +7,6 @@ const routes = [
     name: 'Login',
     component: Login,
     meta: { title: '登录 - CycleGraph' }
-  },
-  {
-    path: '/',
-    name: 'Home',
-    component: Home,
-    meta: {
-      title: '首页 - CycleGraph',
-      requiresAuth: true // 需要登录才能访问
-    }
   },
   {
     path: '/query',
