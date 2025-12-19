@@ -304,25 +304,31 @@ def insert_edge(
         if create_vertices:
             # 检查源点是否存在
             src_exists = fetch_one(
-                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                f"SELECT vid, balance FROM {vertex_table_name} WHERE vid = %s",
                 (src_vid,),
                 **db_kwargs,
             )
             if not src_exists:
-                insert_vertex(username, v_type="auto", vid=src_vid, **db_kwargs)
+                # 创建源点时给予足够的初始余额
+                insert_vertex(
+                    username, v_type="auto", vid=src_vid, balance=amount, **db_kwargs
+                )
+                src_balance = amount
+            else:
+                src_balance = src_exists[1]
 
             # 检查目标点是否存在
             dst_exists = fetch_one(
-                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                f"SELECT vid, balance FROM {vertex_table_name} WHERE vid = %s",
                 (dst_vid,),
                 **db_kwargs,
             )
             if not dst_exists:
                 insert_vertex(username, v_type="auto", vid=dst_vid, **db_kwargs)
         else:
-            # 验证点是否存在
+            # 验证点是否存在并获取余额
             src_exists = fetch_one(
-                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                f"SELECT vid, balance FROM {vertex_table_name} WHERE vid = %s",
                 (src_vid,),
                 **db_kwargs,
             )
@@ -331,9 +337,10 @@ def insert_edge(
                     "status": "error",
                     "message": f"Source vertex {src_vid} does not exist",
                 }
+            src_balance = src_exists[1]
 
             dst_exists = fetch_one(
-                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                f"SELECT vid, balance FROM {vertex_table_name} WHERE vid = %s",
                 (dst_vid,),
                 **db_kwargs,
             )
@@ -342,6 +349,18 @@ def insert_edge(
                     "status": "error",
                     "message": f"Destination vertex {dst_vid} does not exist",
                 }
+
+        # 更新源点和目标点的余额
+        execute_dml(
+            f"UPDATE {vertex_table_name} SET balance = balance - %s WHERE vid = %s",
+            (amount, src_vid),
+            **db_kwargs,
+        )
+        execute_dml(
+            f"UPDATE {vertex_table_name} SET balance = balance + %s WHERE vid = %s",
+            (amount, dst_vid),
+            **db_kwargs,
+        )
 
         # 插入边
         execute_dml(
@@ -389,7 +408,7 @@ def query_cycles(
     limit: int = 10,
     allow_duplicate_vertices: bool = False,
     allow_duplicate_edges: bool = False,
-    use_memory: bool = True,
+    use_memory: bool = False,
 ) -> Dict[str, Any]:
     """查询环路。
 
@@ -506,18 +525,53 @@ def delete_vertex(username: str, vid: int, **db_kwargs: Any) -> Dict[str, Any]:
 
         # 检查点是否存在
         existing = fetch_one(
-            f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s", (vid,), **db_kwargs
+            f"SELECT vid, balance FROM {vertex_table_name} WHERE vid = %s",
+            (vid,),
+            **db_kwargs,
         )
         if not existing:
             return {"status": "error", "message": f"Vertex {vid} does not exist"}
 
-        # 统计相关边的数量
-        edge_count_result = fetch_one(
-            f"SELECT COUNT(*) FROM {edge_table_name} WHERE src_vid = %s OR dst_vid = %s",
+        # 获取所有相关的边（作为源点或目标点）
+        related_edges = fetch_all(
+            f"SELECT eid, src_vid, dst_vid, amount FROM {edge_table_name} WHERE src_vid = %s OR dst_vid = %s",
             (vid, vid),
             **db_kwargs,
         )
-        edges_deleted = edge_count_result[0] if edge_count_result else 0
+        edges_deleted = len(related_edges) if related_edges else 0
+
+        # 计算删除这些边后，各个点的余额变化
+        # balance_changes: {vid: delta_balance}
+        balance_changes = {}
+
+        for edge in related_edges:
+            eid, src_vid, dst_vid, amount = edge
+            # 删除边时，源点余额增加（退回），目标点余额减少
+            if src_vid not in balance_changes:
+                balance_changes[src_vid] = 0
+            if dst_vid not in balance_changes:
+                balance_changes[dst_vid] = 0
+
+            balance_changes[src_vid] += amount  # 源点余额增加
+            balance_changes[dst_vid] -= amount  # 目标点余额减少
+
+        # 先恢复所有相关边的余额
+        for edge in related_edges:
+            eid, src_vid, dst_vid, amount = edge
+            # 源点余额增加（退回）
+            if src_vid != vid:
+                execute_dml(
+                    f"UPDATE {vertex_table_name} SET balance = balance + %s WHERE vid = %s",
+                    (amount, src_vid),
+                    **db_kwargs,
+                )
+            # 目标点余额减少
+            if dst_vid != vid:
+                execute_dml(
+                    f"UPDATE {vertex_table_name} SET balance = balance - %s WHERE vid = %s",
+                    (amount, dst_vid),
+                    **db_kwargs,
+                )
 
         # 删除相关的边（作为源点或目标点）
         execute_dml(
@@ -553,15 +607,35 @@ def delete_edge(username: str, eid: int, **db_kwargs: Any) -> Dict[str, Any]:
         Dict: 删除结果
     """
     try:
-        _, edge_table_name = get_user_table_name(username)
+        vertex_table_name, edge_table_name = get_user_table_name(username)
         # 验证输入
         if not isinstance(eid, int) or eid <= 0:
             return {"status": "error", "message": "Edge ID must be a positive integer"}
 
-        # 检查边是否存在
-        existing = fetch_one("SELECT 1 FROM edge WHERE eid = %s", (eid,), **db_kwargs)
+        # 检查边是否存在并获取边的信息
+        existing = fetch_one(
+            f"SELECT eid, src_vid, dst_vid, amount FROM {edge_table_name} WHERE eid = %s",
+            (eid,),
+            **db_kwargs,
+        )
         if not existing:
             return {"status": "error", "message": f"Edge {eid} does not exist"}
+
+        eid, src_vid, dst_vid, amount = existing
+
+        # 恢复源点余额（增加）
+        execute_dml(
+            f"UPDATE {vertex_table_name} SET balance = balance + %s WHERE vid = %s",
+            (amount, src_vid),
+            **db_kwargs,
+        )
+
+        # 扣除目标点余额（减少）
+        execute_dml(
+            f"UPDATE {vertex_table_name} SET balance = balance - %s WHERE vid = %s",
+            (amount, dst_vid),
+            **db_kwargs,
+        )
 
         # 删除边
         rows_affected = execute_dml(
@@ -571,8 +645,13 @@ def delete_edge(username: str, eid: int, **db_kwargs: Any) -> Dict[str, Any]:
         if rows_affected > 0:
             return {
                 "status": "success",
-                "message": f"Edge {eid} deleted successfully.",
-                "data": {"eid": eid},
+                "message": f"Edge {eid} deleted successfully. Balance restored: src_vid {src_vid} +{amount}, dst_vid {dst_vid} -{amount}.",
+                "data": {
+                    "eid": eid,
+                    "src_vid": src_vid,
+                    "dst_vid": dst_vid,
+                    "amount": amount,
+                },
             }
         else:
             return {"status": "error", "message": f"Edge {eid} does not exist"}
@@ -651,7 +730,9 @@ def update_vertex(
 
         params.append(vid)
 
-        sql = f"UPDATE {vertex_table_name} SET {', '.join(update_fields)} WHERE vid = %s"
+        sql = (
+            f"UPDATE {vertex_table_name} SET {', '.join(update_fields)} WHERE vid = %s"
+        )
         execute_dml(sql, tuple(params), **db_kwargs)
 
         # 查询更新后的数据
@@ -687,7 +768,7 @@ def update_edge(
     Args:
         username: 用户名，用于确定操作哪个用户的表
         eid: 要更新的边ID（必需）
-        amount: 新的交易金额（可选）
+        amount: 新的交易金额
         occur_time: 新的发生时间（可选）
         e_type: 新的边类型（可选）
         **db_kwargs: 数据库连接参数
@@ -713,6 +794,11 @@ def update_edge(
         if not existing:
             return {"status": "error", "message": f"Edge {eid} does not exist"}
 
+        old_edge = Edge.from_tuple(existing)
+        old_amount = old_edge.amount
+        src_vid = old_edge.src_vid
+        dst_vid = old_edge.dst_vid
+
         # 至少需要提供一个要更新的字段
         if amount is None and occur_time is None and e_type is None:
             return {
@@ -727,6 +813,25 @@ def update_edge(
                     "status": "error",
                     "message": "Amount must be a non-negative integer",
                 }
+
+            # 如果金额发生变化，需要调整余额
+            if amount != old_amount:
+                vertex_table_name, _ = get_user_table_name(username)
+                amount_diff = amount - old_amount
+
+                # 更新源点余额：金额增加则余额减少，金额减少则余额增加
+                execute_dml(
+                    f"UPDATE {vertex_table_name} SET balance = balance - %s WHERE vid = %s",
+                    (amount_diff, src_vid),
+                    **db_kwargs,
+                )
+
+                # 更新目标点余额：金额增加则余额增加，金额减少则余额减少
+                execute_dml(
+                    f"UPDATE {vertex_table_name} SET balance = balance + %s WHERE vid = %s",
+                    (amount_diff, dst_vid),
+                    **db_kwargs,
+                )
 
         if occur_time is not None:
             if not isinstance(occur_time, int) or occur_time <= 0:
