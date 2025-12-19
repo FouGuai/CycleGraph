@@ -490,6 +490,7 @@ def query_cycles(
         return cycle_ag.query_cycles(
             start_vid,
             max_depth,
+            username,
             direction,
             vertex_filter_v_type,
             vertex_filter_min_balance,

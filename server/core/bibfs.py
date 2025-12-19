@@ -13,12 +13,14 @@ from server.opengauss.graph_dao import (
     fetch_one,
     Vertex,
     Edge,
+    get_user_table_name,
 )
 
 
 def query_cycles(
     start_vid: int,
     max_depth: int,
+    username: str,
     direction: str = "forward",
     vertex_filter_v_types: Optional[List[str]] = None,
     vertex_filter_min_balance: Optional[int] = None,
@@ -35,6 +37,7 @@ def query_cycles(
     Args:
         start_vid: 起始点ID
         max_depth: 最大搜索深度(环路长度)
+        username: 用户名，用于确定查询哪个用户的表
         direction: 时序方向, "forward"(时间递增) 或 "any"(无时序要求)
         vertex_filter_v_types: 点类型过滤列表
         vertex_filter_min_balance: 点最小余额过滤
@@ -54,7 +57,7 @@ def query_cycles(
 
     try:
         # 1. 验证起始点存在
-        start_vertex = _get_vertex(start_vid, **db_kwargs)
+        start_vertex = _get_vertex(start_vid, username, **db_kwargs)
         if not start_vertex:
             return {"status": "error", "message": f"Start vertex {start_vid} not found"}
 
@@ -72,6 +75,7 @@ def query_cycles(
         cycles = _bidirectional_bfs(
             start_vid=start_vid,
             max_depth=max_depth,
+            username=username,
             direction=direction,
             vertex_filter_v_types=vertex_filter_v_types,
             vertex_filter_min_balance=vertex_filter_min_balance,
@@ -98,7 +102,7 @@ def query_cycles(
         # 5. 获取环的详细信息
         cycle_data = []
         for cycle_path in cycles:
-            vertices_data, edges_data = _get_cycle_details(cycle_path, **db_kwargs)
+            vertices_data, edges_data = _get_cycle_details(cycle_path, username, **db_kwargs)
             cycle_data.append({"vertices": vertices_data, "edges": edges_data})
 
         return {
@@ -119,6 +123,7 @@ def query_cycles(
 def _bidirectional_bfs(
     start_vid: int,
     max_depth: int,
+    username: str,
     direction: str,
     vertex_filter_v_types: Optional[List[str]],
     vertex_filter_min_balance: Optional[int],
@@ -148,96 +153,76 @@ def _bidirectional_bfs(
     _init_search(bwd_table, start_vid, **db_kwargs)
 
     cycles = []
-    seen_cycles: Set[Tuple[int, ...]] = set()  # 动态去重
-    current_depth = 0
+    seen_cycles = set()  # 用于环去重
+    current_depth = 1
 
-    while current_depth < max_depth // 2 and len(cycles) < limit:
-        # 优化：选择较小的表扩展
-        fwd_count = _get_table_count(fwd_table, current_depth, **db_kwargs)
-        bwd_count = _get_table_count(bwd_table, current_depth, **db_kwargs)
-        
-        if fwd_count == 0 and bwd_count == 0:
+    while current_depth <= max_depth // 2 and len(cycles) < limit:
+        # 正向扩展
+        fwd_count = _expand_forward(
+            fwd_table,
+            username,
+            direction,
+            edge_filter_e_types,
+            edge_filter_min_amount,
+            edge_filter_max_amount,
+            vertex_filter_v_types,
+            vertex_filter_min_balance,
+            **db_kwargs,
+        )
+
+        if fwd_count == 0:
             break
-        
+
+        # 检查碰撞
+        new_cycles = _detect_cycles(
+            fwd_table,
+            bwd_table,
+            start_vid,
+            username,
+            allow_duplicate_vertices,
+            allow_duplicate_edges,
+            limit - len(cycles),
+            seen_cycles,
+            **db_kwargs,
+        )
+        cycles.extend(new_cycles)
+
+        if len(cycles) >= limit:
+            break
+
+        # 反向扩展
+        bwd_count = _expand_backward(
+            bwd_table,
+            username,
+            direction,
+            edge_filter_e_types,
+            edge_filter_min_amount,
+            edge_filter_max_amount,
+            vertex_filter_v_types,
+            vertex_filter_min_balance,
+            **db_kwargs,
+        )
+
+        if bwd_count == 0:
+            break
+
+        # 再次检查碰撞
+        new_cycles = _detect_cycles(
+            fwd_table,
+            bwd_table,
+            start_vid,
+            username,
+            allow_duplicate_vertices,
+            allow_duplicate_edges,
+            limit - len(cycles),
+            seen_cycles,
+            **db_kwargs,
+        )
+        cycles.extend(new_cycles)
+
         current_depth += 1
-        
-        if fwd_count <= bwd_count or bwd_count == 0:
-            # 正向扩展
-            expand_count = _expand_forward(
-                fwd_table,
-                bwd_table,
-                direction,
-                edge_filter_e_types,
-                edge_filter_min_amount,
-                edge_filter_max_amount,
-                vertex_filter_v_types,
-                vertex_filter_min_balance,
-                **db_kwargs,
-            )
-
-            if expand_count == 0:
-                break
-
-            # 检查正向新扩展节点与反向的碰撞
-            new_cycles = _detect_cycles(
-                fwd_table,
-                bwd_table,
-                start_vid,
-                current_depth,
-                allow_duplicate_vertices,
-                allow_duplicate_edges,
-                limit - len(cycles),
-                seen_cycles,
-                **db_kwargs,
-            )
-            cycles.extend(new_cycles)
-
-            if len(cycles) >= limit:
-                break
-        else:
-            # 反向扩展
-            expand_count = _expand_backward(
-                bwd_table,
-                fwd_table,
-                direction,
-                edge_filter_e_types,
-                edge_filter_min_amount,
-                edge_filter_max_amount,
-                vertex_filter_v_types,
-                vertex_filter_min_balance,
-                **db_kwargs,
-            )
-
-            if expand_count == 0:
-                break
-
-            # 检查反向新扩展节点与正向的碰撞
-            new_cycles = _detect_cycles(
-                bwd_table,
-                fwd_table,
-                start_vid,
-                current_depth,
-                allow_duplicate_vertices,
-                allow_duplicate_edges,
-                limit - len(cycles),
-                seen_cycles,
-                **db_kwargs,
-            )
-            cycles.extend(new_cycles)
-
-            if len(cycles) >= limit:
-                break
 
     return cycles
-
-
-def _get_table_count(table_name: str, depth: int, **db_kwargs: Any) -> int:
-    """获取表中指定深度的记录数。"""
-    result = fetch_one(
-        f"SELECT COUNT(*) FROM {table_name} WHERE depth = {depth}",
-        **db_kwargs
-    )
-    return result[0] if result else 0
 
 
 def _create_temp_table(table_name: str, **db_kwargs: Any) -> None:
@@ -270,7 +255,7 @@ def _init_search(table_name: str, start_vid: int, **db_kwargs: Any) -> None:
 
 def _expand_forward(
     table_name: str,
-    opposite_table: str,
+    username: str,
     direction: str,
     edge_filter_e_types: Optional[List[str]],
     edge_filter_min_amount: Optional[int],
@@ -280,6 +265,7 @@ def _expand_forward(
     **db_kwargs: Any,
 ) -> int:
     """正向扩展一层。"""
+    vertex_table_name, edge_table_name = get_user_table_name(username)
     conditions = []
 
     # 时序条件
@@ -300,7 +286,7 @@ def _expand_forward(
     # 点过滤条件
     vertex_join = ""
     if vertex_filter_v_types or vertex_filter_min_balance is not None:
-        vertex_join = "JOIN vertex v ON v.vid = e.dst_vid"
+        vertex_join = f"JOIN {vertex_table_name} v ON v.vid = e.dst_vid"
         if vertex_filter_v_types:
             v_types_str = "'" + "','".join(vertex_filter_v_types) + "'"
             conditions.append(f"v.v_type IN ({v_types_str})")
@@ -325,12 +311,11 @@ def _expand_forward(
         t.path_vids || e.dst_vid,
         t.path_eids || e.eid
     FROM {table_name} t
-    JOIN edge e ON e.src_vid = t.vid
+    JOIN {edge_table_name} e ON e.src_vid = t.vid
     {vertex_join}
     WHERE t.depth = {current_max_depth}
       AND {where_clause}
-      AND NOT (e.dst_vid = ANY(t.path_vids))
-      AND NOT EXISTS (SELECT 1 FROM {opposite_table} o WHERE o.vid = e.dst_vid);
+      AND NOT (e.dst_vid = ANY(t.path_vids));
     """
 
     return execute_dml(sql, **db_kwargs)
@@ -338,7 +323,7 @@ def _expand_forward(
 
 def _expand_backward(
     table_name: str,
-    opposite_table: str,
+    username: str,
     direction: str,
     edge_filter_e_types: Optional[List[str]],
     edge_filter_min_amount: Optional[int],
@@ -348,6 +333,7 @@ def _expand_backward(
     **db_kwargs: Any,
 ) -> int:
     """反向扩展一层。"""
+    vertex_table_name, edge_table_name = get_user_table_name(username)
     conditions = []
 
     # 时序条件(反向搜索时间更早)
@@ -368,7 +354,7 @@ def _expand_backward(
     # 点过滤条件
     vertex_join = ""
     if vertex_filter_v_types or vertex_filter_min_balance is not None:
-        vertex_join = "JOIN vertex v ON v.vid = e.src_vid"
+        vertex_join = f"JOIN {vertex_table_name} v ON v.vid = e.src_vid"
         if vertex_filter_v_types:
             v_types_str = "'" + "','".join(vertex_filter_v_types) + "'"
             conditions.append(f"v.v_type IN ({v_types_str})")
@@ -393,12 +379,11 @@ def _expand_backward(
         t.path_vids || e.src_vid,
         t.path_eids || e.eid
     FROM {table_name} t
-    JOIN edge e ON e.dst_vid = t.vid
+    JOIN {edge_table_name} e ON e.dst_vid = t.vid
     {vertex_join}
     WHERE t.depth = {current_max_depth}
       AND {where_clause}
-      AND NOT (e.src_vid = ANY(t.path_vids))
-      AND NOT EXISTS (SELECT 1 FROM {opposite_table} o WHERE o.vid = e.src_vid);
+      AND NOT (e.src_vid = ANY(t.path_vids));
     """
 
     return execute_dml(sql, **db_kwargs)
@@ -408,15 +393,15 @@ def _detect_cycles(
     fwd_table: str,
     bwd_table: str,
     start_vid: int,
-    current_depth: int,
+    username: str,
     allow_duplicate_vertices: bool,
     allow_duplicate_edges: bool,
     remaining_limit: int,
     seen_cycles: Set[Tuple[int, ...]],
     **db_kwargs: Any,
 ) -> List[List[Tuple[int, int, int]]]:
-    """检测当前深度新扩展节点与对侧的碰撞。"""
-    # 只检查当前深度新扩展的节点与对侧的碰撞
+    """检测两个方向的碰撞,找出环路。"""
+    # 找到碰撞点
     sql = f"""
     SELECT 
         f.vid as meet_vid,
@@ -427,7 +412,6 @@ def _detect_cycles(
     FROM {fwd_table} f
     JOIN {bwd_table} b ON f.vid = b.vid
     WHERE f.vid != {start_vid}
-      AND f.depth = {current_depth}
     LIMIT {remaining_limit * 5};
     """
 
@@ -465,7 +449,7 @@ def _detect_cycles(
         if _validate_cycle(
             full_cycle, start_vid, allow_duplicate_vertices, allow_duplicate_edges
         ):
-            # 动态去重
+            # 路径去重：生成标准化签名
             signature = _get_cycle_signature(full_cycle)
             if signature not in seen_cycles:
                 seen_cycles.add(signature)
@@ -475,15 +459,6 @@ def _detect_cycles(
                     break
 
     return cycles
-
-
-def _get_cycle_signature(cycle: List[Tuple[int, int, int]]) -> Tuple[int, ...]:
-    """生成环路的唯一签名，用于去重。
-    
-    使用排序后的边ID作为环的唯一标识，因为一个环由其包含的边集合唯一确定。
-    """
-    edge_ids = tuple(sorted([eid for _, _, eid in cycle]))
-    return edge_ids
 
 
 def _validate_cycle(
@@ -520,9 +495,10 @@ def _validate_cycle(
 
 
 def _get_cycle_details(
-    cycle_path: List[Tuple[int, int, int]], **db_kwargs: Any
+    cycle_path: List[Tuple[int, int, int]], username: str, **db_kwargs: Any
 ) -> Tuple[List[Dict], List[Dict]]:
     """获取环路中所有点和边的详细信息。"""
+    vertex_table_name, edge_table_name = get_user_table_name(username)
     # 收集所有vid和eid
     vids = set([cycle_path[0][0]])  # 起点
     eids = []
@@ -533,23 +509,24 @@ def _get_cycle_details(
     # 查询点信息
     vids_list = list(vids)
     vids_str = ",".join(map(str, vids_list))
-    vertices_sql = f"SELECT vid, v_type, create_time, balance FROM vertex WHERE vid IN ({vids_str})"
+    vertices_sql = f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid IN ({vids_str})"
     vertices_data = fetch_all(vertices_sql, **db_kwargs)
     vertices = [Vertex.from_tuple(v).to_dict() for v in vertices_data]
 
     # 查询边信息
     eids_str = ",".join(map(str, eids))
-    edges_sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM edge WHERE eid IN ({eids_str})"
+    edges_sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name} WHERE eid IN ({eids_str})"
     edges_data = fetch_all(edges_sql, **db_kwargs)
     edges = [Edge.from_tuple(e).to_dict() for e in edges_data]
 
     return vertices, edges
 
 
-def _get_vertex(vid: int, **db_kwargs: Any) -> Optional[Vertex]:
+def _get_vertex(vid: int, username: str, **db_kwargs: Any) -> Optional[Vertex]:
     """获取点信息。"""
+    vertex_table_name, _ = get_user_table_name(username)
     result = fetch_one(
-        "SELECT vid, v_type, create_time, balance FROM vertex WHERE vid = %s",
+        f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid = %s",
         (vid,),
         **db_kwargs,
     )
@@ -577,3 +554,38 @@ def _cleanup_temp_tables(session_id: str, **db_kwargs: Any) -> None:
             execute_ddl(f"DROP TABLE IF EXISTS {table};", **db_kwargs)
         except Exception:
             pass  # 忽略清理错误
+
+
+def _get_cycle_signature(cycle: List[Tuple[int, int, int]]) -> Tuple[int, ...]:
+    """生成环路的唯一签名，用于去重。
+    
+    使用标准化的边ID序列作为环的唯一标识：
+    1. 找到最小的边ID作为起点
+    2. 从该边开始，按照环的顺序排列所有边ID
+    3. 考虑正向和反向（防止 [1,2,3] 和 [3,2,1] 被认为是不同的环）
+    
+    Args:
+        cycle: 环路，格式为 [(src_vid, dst_vid, eid), ...]
+    
+    Returns:
+        环路的归一化签名
+    """
+    if not cycle:
+        return tuple()
+    
+    edge_ids = [eid for _, _, eid in cycle]
+    
+    # 找到最小边ID的位置
+    min_eid = min(edge_ids)
+    min_idx = edge_ids.index(min_eid)
+    
+    # 从最小边ID开始，构造标准化序列
+    normalized = edge_ids[min_idx:] + edge_ids[:min_idx]
+    
+    # 考虑反向：也从最小边开始，但是反向遍历
+    reversed_cycle = list(reversed(edge_ids))
+    min_idx_rev = reversed_cycle.index(min_eid)
+    normalized_rev = reversed_cycle[min_idx_rev:] + reversed_cycle[:min_idx_rev]
+    
+    # 返回字典序较小的那个作为标准签名
+    return tuple(normalized) if normalized <= normalized_rev else tuple(normalized_rev)
