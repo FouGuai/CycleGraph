@@ -260,7 +260,7 @@
         </el-card>
 
         <!-- 操作结果统计 -->
-        <el-card class="result-stats" v-if="queryResult" style="margin-bottom: 20px;">
+        <el-card class="result-stats" v-if="queryResult" style="margin-bottom: 0px;">
           <template #header>
             <div class="panel-header">
               <el-icon>
@@ -295,42 +295,43 @@
       <el-col :span="16">
 
         <!-- 图可视化 -->
-        <el-card class="visualization-panel">
-          <template #header>
-            <div class="panel-header">
-              <div>
-                <el-icon>
-                  <PieChart />
+        <div style="position: relative; height: 100%; display: flex; flex-direction: column;">
+          <el-card class="visualization-panel">
+            <template #header>
+              <div class="panel-header">
+                <div>
+                  <el-icon>
+                    <PieChart />
+                  </el-icon>
+                  <span>图可视化</span>
+                </div>
+                <div class="header-actions">
+                  <el-button size="small" @click="resetZoom" :disabled="!hasGraphData">
+                    <el-icon>
+                      <RefreshRight />
+                    </el-icon>
+                    重置视图
+                  </el-button>
+                  <el-button size="small" @click="exportData" :disabled="!hasGraphData">
+                    <el-icon>
+                      <Download />
+                    </el-icon>
+                    导出数据
+                  </el-button>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="!hasGraphData" class="empty-state">
+              <el-empty description="暂无数据，请执行查询操作">
+                <el-icon :size="100" color="#909399">
+                  <Box />
                 </el-icon>
-                <span>图可视化</span>
-              </div>
-              <div class="header-actions">
-                <el-button size="small" @click="resetZoom" :disabled="!hasGraphData">
-                  <el-icon>
-                    <RefreshRight />
-                  </el-icon>
-                  重置视图
-                </el-button>
-                <el-button size="small" @click="exportData" :disabled="!hasGraphData">
-                  <el-icon>
-                    <Download />
-                  </el-icon>
-                  导出数据
-                </el-button>
-              </div>
+              </el-empty>
             </div>
-          </template>
 
-          <div v-if="!hasGraphData" class="empty-state">
-            <el-empty description="暂无数据，请执行查询操作">
-              <el-icon :size="100" color="#909399">
-                <Box />
-              </el-icon>
-            </el-empty>
-          </div>
-
-          <div v-else>
-            <div ref="chartContainer" class="chart-container"></div>
+            <div v-else>
+              <div ref="chartContainer" class="chart-container"></div>
 
             <!-- 右键菜单浮动窗口 -->
             <teleport to="body">
@@ -505,56 +506,71 @@
                 </el-button>
               </el-tag>
             </div>
-
-            <!-- 环路列表 -->
-            <div v-if="activeTab === 'cycle' && cycleList.length > 0" class="cycle-list">
-              <el-divider>环路详情 (共 {{ cycleList.length }} 个)</el-divider>
-              <el-collapse v-model="activeCycle">
-                <el-collapse-item v-for="(cycle, index) in cycleList" :key="index" :name="index">
-                  <template #title>
-                    <div class="cycle-title">
-                      <el-tag :type="displayedCycles.includes(index) ? 'success' : 'primary'" size="small">
-                        环路 {{ index + 1 }}
-                        <span v-if="displayedCycles.includes(index)">✓</span>
-                      </el-tag>
-                      <span class="cycle-info">长度: {{ cycle.vertices?.length || cycle.length }}</span>
-                      <el-tag v-if="displayedCycles.includes(index)" size="small" type="success" effect="plain">
-                        当前显示
-                      </el-tag>
-                    </div>
-                  </template>
-                  <div class="cycle-content">
-                    <div class="path-section">
-                      <strong>路径:</strong>
-                      <div class="path-nodes">
-                        <template v-if="cycle.vertices">
-                          <el-tag v-for="(vertex, idx) in cycle.vertices" :key="idx" size="small" class="path-tag">
-                            {{ vertex.vid }}
-                          </el-tag>
-                        </template>
-                        <template v-else-if="cycle.path">
-                          <el-tag v-for="(vid, idx) in cycle.path" :key="idx" size="small" class="path-tag">
-                            {{ vid }}
-                          </el-tag>
-                        </template>
-                      </div>
-                    </div>
-                    <el-button size="small"
-                      :type="displayedCycles.length === 1 && displayedCycles[0] === index ? 'success' : 'primary'"
-                      @click="highlightCycle(index)" style="margin-top: 10px">
-                      {{ displayedCycles.length === 1 && displayedCycles[0] === index ? '✓ 已显示此环路' : '单独显示此环路' }}
-                    </el-button>
-                    <el-button v-if="displayedCycles.length === 1 && displayedCycles[0] === index" size="small"
-                      type="info" plain @click="buildGraphFromCycles(cycleList)"
-                      style="margin-top: 10px; margin-left: 10px">
-                      显示所有环路
-                    </el-button>
-                  </div>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
           </div>
         </el-card>
+
+        <!-- 底部环路面板 -->
+        <div v-if="activeTab === 'cycle' && cycleList.length > 0" 
+             class="cycle-bottom-panel" 
+             :class="{ collapsed: cycleDrawerCollapsed }"
+             :style="{ height: cycleDrawerCollapsed ? '32px' : cycleDrawerHeight + 'px' }">
+          <div class="cycle-panel-header" @click="cycleDrawerCollapsed = !cycleDrawerCollapsed">
+            <div class="cycle-panel-resizer" @mousedown.stop="startResizeCycleDrawer"></div>
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+              <el-icon><DataAnalysis /></el-icon>
+              <span style="font-weight: 600;">环路列表 (共 {{ cycleList.length }} 个)</span>
+            </div>
+            <el-icon style="transition: transform 0.3s;" :style="{ transform: cycleDrawerCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }">
+              <ArrowDown />
+            </el-icon>
+          </div>
+          <div v-show="!cycleDrawerCollapsed" class="cycle-panel-content">
+            <el-collapse v-model="activeCycle">
+              <el-collapse-item v-for="(cycle, index) in cycleList" :key="index" :name="index">
+                <template #title>
+                  <div class="cycle-title">
+                    <el-tag :type="displayedCycles.includes(index) ? 'success' : 'primary'" size="small">
+                      环路 {{ index + 1 }}
+                      <span v-if="displayedCycles.includes(index)">✓</span>
+                    </el-tag>
+                    <span class="cycle-info">长度: {{ cycle.vertices?.length || cycle.length }}</span>
+                    <el-tag v-if="displayedCycles.includes(index)" size="small" type="success" effect="plain">
+                      当前显示
+                    </el-tag>
+                  </div>
+                </template>
+                <div class="cycle-content">
+                  <div class="path-section">
+                    <strong>路径:</strong>
+                    <div class="path-nodes">
+                      <template v-if="cycle.vertices">
+                        <el-tag v-for="(vertex, idx) in cycle.vertices" :key="idx" size="small" class="path-tag">
+                          {{ vertex.vid }}
+                        </el-tag>
+                      </template>
+                      <template v-else-if="cycle.path">
+                        <el-tag v-for="(vid, idx) in cycle.path" :key="idx" size="small" class="path-tag">
+                          {{ vid }}
+                        </el-tag>
+                      </template>
+                    </div>
+                  </div>
+                  <el-button size="small"
+                    :type="displayedCycles.length === 1 && displayedCycles[0] === index ? 'success' : 'primary'"
+                    @click="highlightCycle(index)" style="margin-top: 10px">
+                    {{ displayedCycles.length === 1 && displayedCycles[0] === index ? '✓ 已显示此环路' : '单独显示此环路' }}
+                  </el-button>
+                  <el-button v-if="displayedCycles.length === 1 && displayedCycles[0] === index" size="small"
+                    type="info" plain @click="buildGraphFromCycles(cycleList)"
+                    style="margin-top: 10px; margin-left: 10px">
+                    显示所有环路
+                  </el-button>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </div>
+      </div>
       </el-col>
     </el-row>
   </div>
@@ -564,7 +580,7 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete, Connection, Edit
+  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete, Connection, Edit, ArrowDown
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { executeCommand } from '@/api/graph'
@@ -657,6 +673,8 @@ const quickEdgeDialogVisible = ref(false)
 const quickInsertPosition = ref({ x: 0, y: 0 })
 const selectedNodesForEdge = ref([]) // 用于Shift+点击选择两个节点连边
 const isShiftKeyPressed = ref(false) // 跟踪Shift键状态
+const cycleDrawerHeight = ref(250) // 环路面板高度
+const cycleDrawerCollapsed = ref(false) // 环路面板是否折叠
 const quickInsertVertexForm = reactive({
   vType: 'account',
   balance: 0
@@ -1452,6 +1470,36 @@ const exportData = () => {
   ElMessage.success('数据已导出')
 }
 
+// 拖拽调整环路面板大小
+const startResizeCycleDrawer = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  
+  const startY = e.clientY
+  const startHeight = cycleDrawerHeight.value
+
+  const onMouseMove = (moveEvent) => {
+    const deltaY = startY - moveEvent.clientY // 注意：向上拖动增加高度
+    const newHeight = Math.max(32, Math.min(600, startHeight + deltaY))
+    cycleDrawerHeight.value = newHeight
+    
+    // 如果高度小于50px，自动折叠
+    if (newHeight < 50) {
+      cycleDrawerCollapsed.value = true
+    } else {
+      cycleDrawerCollapsed.value = false
+    }
+  }
+
+  const onMouseUp = () => {
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+  }
+
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
+
 // 清空图表
 const clearGraph = () => {
   graphData.nodes = []
@@ -2180,6 +2228,8 @@ onUnmounted(() => {
 
 .result-stats {
   border-radius: 12px;
+  margin-top: 16px;
+  margin-bottom: 16px;
 }
 
 .panel-header {
@@ -2259,11 +2309,81 @@ onUnmounted(() => {
   min-height: 400px;
 }
 
-.cycle-list {
-  margin-top: 10px;
-  max-height: 150px;
-  overflow-y: auto;
+/* 底部环路面板 */
+.cycle-bottom-panel {
+  position: relative;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 8px;
+  overflow: hidden;
+  transition: height 0.3s ease;
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
+}
+
+.cycle-bottom-panel.collapsed {
+  height: 32px !important;
+}
+
+.cycle-panel-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8eaf6 100%);
+  border-bottom: 1px solid #e4e7ed;
+  cursor: pointer;
+  user-select: none;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.cycle-panel-header:hover {
+  background: linear-gradient(135deg, #e8eaf6 0%, #dce0f5 100%);
+}
+
+.cycle-panel-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: linear-gradient(to bottom, rgba(102, 126, 234, 0.15), transparent);
+  cursor: ns-resize;
+  transition: background 0.2s;
+  z-index: 10;
+}
+
+.cycle-panel-resizer:hover {
+  background: linear-gradient(to bottom, rgba(102, 126, 234, 0.3), transparent);
+}
+
+.cycle-panel-resizer:active {
+  background: rgba(102, 126, 234, 0.5);
+}
+
+.cycle-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.cycle-panel-content .el-collapse {
+  border: none;
+}
+
+.cycle-panel-content .el-collapse-item__header {
+  background: #f9fafc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.cycle-panel-content .el-collapse-item__wrap {
+  border: none;
 }
 
 .cycle-title {

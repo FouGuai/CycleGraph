@@ -9,14 +9,6 @@
             <span>CycleGraph</span>
           </div>
           <div class="header-right">
-            <el-menu
-              mode="horizontal"
-              :default-active="activeRoute"
-              router
-              class="header-menu"
-            >
-              <el-menu-item index="/query">图查询</el-menu-item>
-            </el-menu>
             <div class="user-info">
               <el-dropdown @command="handleUserCommand">
                 <span class="user-dropdown">
