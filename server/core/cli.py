@@ -90,7 +90,12 @@ def handle_connect(args) -> Dict[str, Any]:
 
 def handle_query_vertex(args) -> Dict[str, Any]:
     """处理查询点命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
     return query_vertices(
+        username=username,
         vid=args.vid,
         v_types=args.v_type,
         min_create_time=args.min_time,
@@ -102,7 +107,12 @@ def handle_query_vertex(args) -> Dict[str, Any]:
 
 def handle_query_edge(args) -> Dict[str, Any]:
     """处理查询边命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
     return query_edges(
+        username=username,
         eid=args.eid,
         src_vid=args.src_vid,
         dst_vid=args.dst_vid,
@@ -116,7 +126,12 @@ def handle_query_edge(args) -> Dict[str, Any]:
 
 def handle_query_cycle(args) -> Dict[str, Any]:
     """处理查询环路命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
     kwargs = {
+        "username": username,
         "start_vid": args.start_vid,
         "max_depth": args.max_depth,
         "direction": args.direction,
@@ -143,7 +158,12 @@ def handle_query_cycle(args) -> Dict[str, Any]:
 
 def handle_insert_vertex(args) -> Dict[str, Any]:
     """处理插入点命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
     return insert_vertex(
+        username=username,
         v_type=args.v_type,
         vid=args.vid,
         create_time=args.create_time,
@@ -153,7 +173,12 @@ def handle_insert_vertex(args) -> Dict[str, Any]:
 
 def handle_insert_edge(args) -> Dict[str, Any]:
     """处理插入边命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
     return insert_edge(
+        username=username,
         eid=args.eid,
         src_vid=args.src_vid,
         dst_vid=args.dst_vid,
@@ -166,12 +191,20 @@ def handle_insert_edge(args) -> Dict[str, Any]:
 
 def handle_delete_vertex(args) -> Dict[str, Any]:
     """处理删除点命令"""
-    return delete_vertex(vid=args.vid)
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
+    return delete_vertex(username=username, vid=args.vid)
 
 
 def handle_delete_edge(args) -> Dict[str, Any]:
     """处理删除边命令"""
-    return delete_edge(eid=args.eid)
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
+    return delete_edge(username=username, eid=args.eid)
 
 
 # ==================== 命令定义 ====================
@@ -586,11 +619,12 @@ def _add_commands_to_parser(
 _PARSER = build_parser()
 
 
-def execute_command(args_list: List[str]) -> Dict[str, Any]:
+def execute_command(args_list: List[str], username: Optional[str] = None) -> Dict[str, Any]:
     """执行 CLI 命令并返回结果字典。
 
     Args:
         args_list: 命令参数列表,例如 ['register', '--username', 'alice', '--password', 'pass123']
+        username: 当前登录的用户名(从token验证获得),用于多用户表隔离
 
     Returns:
         Dict: 执行结果的字典
@@ -605,6 +639,8 @@ def execute_command(args_list: List[str]) -> Dict[str, Any]:
         return {"status": "error", "message": "Unknown command"}
 
     try:
+        # 将 username 附加到 args 对象上，供处理器使用
+        args.username_context = username
         return args.handler(args)
     except Exception as e:
         return {"status": "error", "message": f"Command execution failed: {str(e)}"}

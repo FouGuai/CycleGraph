@@ -332,28 +332,116 @@
           <div v-else>
             <div ref="chartContainer" class="chart-container"></div>
 
+            <!-- 右键菜单 -->
+            <teleport to="body">
+              <div
+                v-if="contextMenuVisible"
+                class="context-menu"
+                :style="{
+                  left: contextMenuPosition.x + 'px',
+                  top: contextMenuPosition.y + 'px'
+                }"
+                @click.stop
+              >
+                <div v-if="contextMenuTarget?.type === 'node'" class="menu-item" @click="deleteNodeFromMenu">
+                  <el-icon><Delete /></el-icon>
+                  <span>删除节点 {{ contextMenuTarget.data.id }}</span>
+                </div>
+                <div v-if="contextMenuTarget?.type === 'edge'" class="menu-item" @click="deleteEdgeFromMenu">
+                  <el-icon><Delete /></el-icon>
+                  <span>删除边 {{ contextMenuTarget.data.rawData?.eid }}</span>
+                </div>
+              </div>
+            </teleport>
+
+            <!-- 快速插入节点对话框 -->
+            <el-dialog
+              v-model="quickInsertDialogVisible"
+              title="快速插入节点"
+              width="400px"
+              :close-on-click-modal="false"
+            >
+              <el-form :model="quickInsertVertexForm" label-width="80px">
+                <el-form-item label="点类型" required>
+                  <el-input v-model="quickInsertVertexForm.vType" placeholder="例如: account, company" />
+                </el-form-item>
+                <el-form-item label="初始余额">
+                  <el-input-number v-model="quickInsertVertexForm.balance" :min="0" style="width: 100%" />
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <el-button @click="quickInsertDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="quickInsertNode" :loading="loading">插入</el-button>
+              </template>
+            </el-dialog>
+
+            <!-- Shift+点击提示 -->
+            <div v-if="selectedNodesForEdge.length > 0" class="selection-hint">
+              <el-tag type="danger" size="large" effect="dark">
+                <el-icon><Connection /></el-icon>
+                已选中 {{ selectedNodesForEdge.length }} 个节点: {{ selectedNodesForEdge.join(', ') }}
+                <span v-if="selectedNodesForEdge.length < 2"> - 再选择一个节点以创建边</span>
+                <el-button
+                  text
+                  size="small"
+                  @click="selectedNodesForEdge = []; updateNodeSelection()"
+                  style="margin-left: 10px; color: white;"
+                >
+                  清除
+                </el-button>
+              </el-tag>
+            </div>
+
             <!-- 环路列表 -->
             <div v-if="activeTab === 'cycle' && cycleList.length > 0" class="cycle-list">
-              <el-divider>环路详情</el-divider>
+              <el-divider>环路详情 (共 {{ cycleList.length }} 个)</el-divider>
               <el-collapse v-model="activeCycle">
                 <el-collapse-item v-for="(cycle, index) in cycleList" :key="index" :name="index">
                   <template #title>
                     <div class="cycle-title">
-                      <el-tag type="primary" size="small">环路 {{ index + 1 }}</el-tag>
-                      <span class="cycle-info">长度: {{ cycle.length }}</span>
+                      <el-tag :type="displayedCycles.includes(index) ? 'success' : 'primary'" size="small">
+                        环路 {{ index + 1 }}
+                        <span v-if="displayedCycles.includes(index)">✓</span>
+                      </el-tag>
+                      <span class="cycle-info">长度: {{ cycle.vertices?.length || cycle.length }}</span>
+                      <el-tag v-if="displayedCycles.includes(index)" size="small" type="success" effect="plain">
+                        当前显示
+                      </el-tag>
                     </div>
                   </template>
                   <div class="cycle-content">
                     <div class="path-section">
                       <strong>路径:</strong>
                       <div class="path-nodes">
-                        <el-tag v-for="(vid, idx) in cycle.path" :key="idx" size="small" class="path-tag">
-                          {{ vid }}
-                        </el-tag>
+                        <template v-if="cycle.vertices">
+                          <el-tag v-for="(vertex, idx) in cycle.vertices" :key="idx" size="small" class="path-tag">
+                            {{ vertex.vid }}
+                          </el-tag>
+                        </template>
+                        <template v-else-if="cycle.path">
+                          <el-tag v-for="(vid, idx) in cycle.path" :key="idx" size="small" class="path-tag">
+                            {{ vid }}
+                          </el-tag>
+                        </template>
                       </div>
                     </div>
-                    <el-button size="small" type="primary" @click="highlightCycle(index)" style="margin-top: 10px">
-                      在图中高亮显示
+                    <el-button 
+                      size="small" 
+                      :type="displayedCycles.length === 1 && displayedCycles[0] === index ? 'success' : 'primary'" 
+                      @click="highlightCycle(index)"
+                      style="margin-top: 10px"
+                    >
+                      {{ displayedCycles.length === 1 && displayedCycles[0] === index ? '✓ 已显示此环路' : '单独显示此环路' }}
+                    </el-button>
+                    <el-button 
+                      v-if="displayedCycles.length === 1 && displayedCycles[0] === index"
+                      size="small" 
+                      type="info" 
+                      plain
+                      @click="buildGraphFromCycles(cycleList)"
+                      style="margin-top: 10px; margin-left: 10px"
+                    >
+                      显示所有环路
                     </el-button>
                   </div>
                 </el-collapse-item>
@@ -370,7 +458,7 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete
+  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete, Connection
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { executeCommand } from '@/api/graph'
@@ -451,6 +539,38 @@ const graphData = reactive({
 // 环路相关
 const cycleList = ref([])
 const activeCycle = ref([0])
+const displayedCycles = ref([]) // 当前显示的环路索引列表
+const maxDisplayCycles = 5 // 最多同时显示的环路数量
+
+// 交互相关状态
+const contextMenuVisible = ref(false)
+const contextMenuPosition = ref({ x: 0, y: 0 })
+const contextMenuTarget = ref(null) // { type: 'node'|'edge', data: ... }
+const quickInsertDialogVisible = ref(false)
+const quickInsertPosition = ref({ x: 0, y: 0 })
+const selectedNodesForEdge = ref([]) // 用于Shift+点击选择两个节点连边
+const quickInsertVertexForm = reactive({
+  vType: 'account',
+  balance: 0
+})
+const quickInsertEdgeForm = reactive({
+  amount: 1000,
+  eType: '+'
+})
+
+// 时间格式化辅助函数
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '未知'
+  const date = new Date(timestamp * 1000) // Unix时间戳转毫秒
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
 
 // 查询全图
 const queryFullGraph = async () => {
@@ -478,7 +598,8 @@ const queryFullGraph = async () => {
       name: `V${v.vid}`,
       value: v.balance,
       category: v.v_type,
-      symbolSize: Math.max(30, Math.min(80, v.balance / 1000))
+      symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
+      rawData: v // 保留原始数据用于tooltip显示
     })) : []
 
     graphData.links = hasEdges ? edgeResponse.data.map(e => ({
@@ -488,7 +609,8 @@ const queryFullGraph = async () => {
       label: e.e_type,
       lineStyle: {
         width: Math.max(1, Math.min(5, e.amount / 5000))
-      }
+      },
+      rawData: e // 保留原始数据用于tooltip显示
     })) : []
 
     queryResult.value = {
@@ -810,7 +932,8 @@ const buildGraphFromVertices = (vertices) => {
     name: `V${v.vid}`,
     value: v.balance,
     category: v.v_type,
-    symbolSize: Math.max(30, Math.min(80, v.balance / 1000))
+    symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
+    rawData: v // 保留原始数据
   }))
   graphData.links = []
   hasGraphData.value = true
@@ -838,7 +961,8 @@ const buildGraphFromEdges = async (edges) => {
           name: `V${v.vid}`,
           value: v.balance,
           category: v.v_type,
-          symbolSize: Math.max(30, Math.min(80, v.balance / 1000))
+          symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
+          rawData: v // 保留原始数据
         })
       }
     } catch (error) {
@@ -848,7 +972,8 @@ const buildGraphFromEdges = async (edges) => {
         name: `V${vid}`,
         value: 0,
         category: 'unknown',
-        symbolSize: 40
+        symbolSize: 40,
+        rawData: { vid, v_type: 'unknown', balance: 0, create_time: null } // 默认数据
       })
     }
   }
@@ -861,7 +986,8 @@ const buildGraphFromEdges = async (edges) => {
     label: e.e_type,
     lineStyle: {
       width: Math.max(1, Math.min(5, e.amount / 5000))
-    }
+    },
+    rawData: e // 保留原始数据
   }))
 
   hasGraphData.value = true
@@ -871,9 +997,16 @@ const buildGraphFromEdges = async (edges) => {
 // 从环路数据构建图
 const buildGraphFromCycles = (cycles) => {
   const nodeMap = new Map()
-  const linkSet = new Set()
+  const edgeMap = new Map()
+  
+  // 确定要显示的环路数量
+  const cyclesToDisplay = Math.min(cycles.length, maxDisplayCycles)
+  displayedCycles.value = Array.from({ length: cyclesToDisplay }, (_, i) => i)
 
-  cycles.forEach(cycle => {
+  // 合并前N个环的数据
+  for (let i = 0; i < cyclesToDisplay; i++) {
+    const cycle = cycles[i]
+    
     // 添加点
     cycle.vertices.forEach(v => {
       nodeMap.set(v.vid.toString(), {
@@ -881,32 +1014,37 @@ const buildGraphFromCycles = (cycles) => {
         name: `V${v.vid}`,
         value: v.balance,
         category: v.v_type,
-        symbolSize: Math.max(30, Math.min(80, v.balance / 1000))
+        symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
+        rawData: v // 保留原始数据
       })
     })
-
+    
     // 添加边
     cycle.edges.forEach(e => {
       const key = `${e.src_vid}-${e.dst_vid}`
-      if (!linkSet.has(key)) {
-        linkSet.add(key)
-      }
+      edgeMap.set(key, {
+        source: e.src_vid.toString(),
+        target: e.dst_vid.toString(),
+        value: e.amount,
+        label: e.e_type,
+        lineStyle: {
+          width: Math.max(1, Math.min(5, e.amount / 5000))
+        },
+        rawData: e // 保留原始数据
+      })
     })
-  })
+  }
 
   graphData.nodes = Array.from(nodeMap.values())
-  graphData.links = cycles[0].edges.map(e => ({
-    source: e.src_vid.toString(),
-    target: e.dst_vid.toString(),
-    value: e.amount,
-    label: e.e_type,
-    lineStyle: {
-      width: Math.max(1, Math.min(5, e.amount / 5000))
-    }
-  }))
+  graphData.links = Array.from(edgeMap.values())
 
   hasGraphData.value = true
   renderGraph()
+  
+  // 如果有未显示的环路，提示用户
+  if (cycles.length > maxDisplayCycles) {
+    ElMessage.info(`图中显示前 ${maxDisplayCycles} 个环路，点击列表中的环路可查看其他环路`)
+  }
 }
 
 // 渲染图表
@@ -942,19 +1080,39 @@ const renderGraph = () => {
       tooltip: {
         formatter: function (params) {
           if (params.dataType === 'node') {
+            const node = params.data
+            const raw = node.rawData || {}
             return `
-              <div style="padding: 5px">
-                <strong>${params.data.name}</strong><br/>
-                类型: ${params.data.category}<br/>
-                余额: ${params.data.value}
+              <div style="padding: 10px; max-width: 350px;">
+                <strong style="font-size: 15px; color: #409eff;">📍 点信息</strong><br/>
+                <div style="margin-top: 10px; line-height: 1.8; font-size: 13px;">
+                  <div><span style="color: #909399;">点ID (vid):</span> <strong style="color: #303133;">${raw.vid || node.id}</strong></div>
+                  <div><span style="color: #909399;">类型 (v_type):</span> <strong style="color: #303133;">${raw.v_type || node.category}</strong></div>
+                  <div><span style="color: #909399;">余额 (balance):</span> <strong style="color: #303133;">${(raw.balance !== undefined ? raw.balance : node.value).toLocaleString()}</strong></div>
+                  <div><span style="color: #909399;">创建时间 (create_time):</span> <strong style="color: #303133;">${formatTimestamp(raw.create_time)}</strong></div>
+                  <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #dcdfe6;">
+                    <span style="color: #909399; font-size: 11px;">时间戳: ${raw.create_time || '未知'}</span>
+                  </div>
+                </div>
               </div>
             `
           } else if (params.dataType === 'edge') {
+            const edge = params.data
+            const raw = edge.rawData || {}
             return `
-              <div style="padding: 5px">
-                <strong>${params.data.source} → ${params.data.target}</strong><br/>
-                类型: ${params.data.label}<br/>
-                金额: ${params.data.value}
+              <div style="padding: 10px; max-width: 350px;">
+                <strong style="font-size: 15px; color: #67c23a;">🔗 边信息</strong><br/>
+                <div style="margin-top: 10px; line-height: 1.8; font-size: 13px;">
+                  <div><span style="color: #909399;">边ID (eid):</span> <strong style="color: #303133;">${raw.eid || '未知'}</strong></div>
+                  <div><span style="color: #909399;">源点ID (src_vid):</span> <strong style="color: #303133;">${raw.src_vid || edge.source}</strong></div>
+                  <div><span style="color: #909399;">目标点ID (dst_vid):</span> <strong style="color: #303133;">${raw.dst_vid || edge.target}</strong></div>
+                  <div><span style="color: #909399;">边类型 (e_type):</span> <strong style="color: #303133;">${raw.e_type || edge.label}</strong></div>
+                  <div><span style="color: #909399;">金额 (amount):</span> <strong style="color: #303133;">${(raw.amount !== undefined ? raw.amount : edge.value).toLocaleString()}</strong></div>
+                  <div><span style="color: #909399;">发生时间 (occur_time):</span> <strong style="color: #303133;">${formatTimestamp(raw.occur_time)}</strong></div>
+                  <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #dcdfe6;">
+                    <span style="color: #909399; font-size: 11px;">时间戳: ${raw.occur_time || '未知'}</span>
+                  </div>
+                </div>
               </div>
             `
           }
@@ -978,9 +1136,13 @@ const renderGraph = () => {
         label: {
           show: true,
           position: 'right',
-          formatter: '{b}',
+          formatter: (params) => {
+            // 显示点ID
+            return params.data.id
+          },
           fontSize: 14,
-          fontWeight: 'bold'
+          fontWeight: 'bold',
+          color: '#333'
         },
         labelLayout: {
           hideOverlap: true
@@ -1023,6 +1185,16 @@ const renderGraph = () => {
 
     chartInstance.setOption(option, true)
 
+    // 移除旧的事件监听器
+    chartInstance.off('dblclick')
+    chartInstance.off('click')
+    
+    // 添加双击事件监听
+    chartInstance.on('dblclick', handleChartDblClick)
+    
+    // 添加点击事件监听（用于Shift+点击）
+    chartInstance.on('click', handleNodeClick)
+
     // 确保图表自适应容器大小
     setTimeout(() => {
       if (chartInstance) {
@@ -1034,20 +1206,47 @@ const renderGraph = () => {
 
 // 高亮显示环路
 const highlightCycle = (index) => {
-  if (!chartInstance || !cycleList.value[index]) return
-
+  if (!cycleList.value[index]) return
+  
   const cycle = cycleList.value[index]
-  const pathVids = cycle.path.map(v => v.toString())
-
-  chartInstance.dispatchAction({
-    type: 'highlight',
-    seriesIndex: 0,
-    dataIndex: graphData.nodes
-      .map((n, i) => pathVids.includes(n.id) ? i : -1)
-      .filter(i => i !== -1)
+  
+  // 重新构建图数据，只显示这个环路
+  const nodeMap = new Map()
+  const edgeMap = new Map()
+  
+  // 添加这个环的点
+  cycle.vertices.forEach(v => {
+    nodeMap.set(v.vid.toString(), {
+      id: v.vid.toString(),
+      name: `V${v.vid}`,
+      value: v.balance,
+      category: v.v_type,
+      symbolSize: Math.max(30, Math.min(80, v.balance / 1000)),
+      rawData: v // 保留原始数据
+    })
   })
-
-  ElMessage.success(`已高亮环路 ${index + 1}`)
+  
+  // 添加这个环的边
+  cycle.edges.forEach(e => {
+    const key = `${e.src_vid}-${e.dst_vid}`
+    edgeMap.set(key, {
+      source: e.src_vid.toString(),
+      target: e.dst_vid.toString(),
+      value: e.amount,
+      label: e.e_type,
+      lineStyle: {
+        width: Math.max(1, Math.min(5, e.amount / 5000))
+      },
+      rawData: e // 保留原始数据
+    })
+  })
+  
+  graphData.nodes = Array.from(nodeMap.values())
+  graphData.links = Array.from(edgeMap.values())
+  displayedCycles.value = [index]
+  
+  renderGraph()
+  ElMessage.success(`已切换显示环路 ${index + 1}`)
 }
 
 // 重置视图
@@ -1086,10 +1285,308 @@ const exportData = () => {
 const clearGraph = () => {
   graphData.nodes = []
   graphData.links = []
-  hasGraphData.value = false
-  queryResult.value = null
+  displayedCycles.value = []
+  selectedNodesForEdge.value = []
   if (chartInstance && !chartInstance.isDisposed()) {
     chartInstance.clear()
+  }
+}
+
+// 处理图表双击事件
+const handleChartDblClick = (params) => {
+  if (params.componentType === 'series') {
+    if (params.dataType === 'node') {
+      // 双击节点，显示删除菜单
+      contextMenuTarget.value = {
+        type: 'node',
+        data: params.data
+      }
+      showContextMenu(params.event.event)
+    } else if (params.dataType === 'edge') {
+      // 双击边，显示删除菜单
+      contextMenuTarget.value = {
+        type: 'edge',
+        data: params.data
+      }
+      showContextMenu(params.event.event)
+    }
+  } else {
+    // 双击空白处，显示插入节点对话框
+    quickInsertDialogVisible.value = true
+    quickInsertVertexForm.vType = 'account'
+    quickInsertVertexForm.balance = 0
+  }
+}
+
+// 显示右键菜单
+const showContextMenu = (event) => {
+  contextMenuVisible.value = true
+  contextMenuPosition.value = {
+    x: event.clientX,
+    y: event.clientY
+  }
+}
+
+// 隐藏右键菜单
+const hideContextMenu = () => {
+  contextMenuVisible.value = false
+  contextMenuTarget.value = null
+}
+
+// 从右键菜单删除节点
+const deleteNodeFromMenu = async () => {
+  if (!contextMenuTarget.value || contextMenuTarget.value.type !== 'node') return
+  
+  const nodeData = contextMenuTarget.value.data
+  const vid = nodeData.rawData?.vid || nodeData.id
+  
+  hideContextMenu()
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除点 ${vid} 吗？这将同时删除所有相关的边。`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    loading.value = true
+    const command = ['delete', 'vertex', '--vid', vid.toString()]
+    const response = await executeCommand(command)
+
+    if (response.status === 'success') {
+      const edgesDeleted = response.data?.edges_deleted || 0
+      ElMessage.success(`点删除成功，同时删除了 ${edgesDeleted} 条相关的边`)
+      // 刷新当前视图
+      if (activeTab.value === 'fullGraph') {
+        await queryFullGraph()
+      } else if (activeTab.value === 'vertex') {
+        await queryVertex()
+      } else if (activeTab.value === 'edge') {
+        await queryEdge()
+      } else if (activeTab.value === 'cycle' && cycleList.value.length > 0) {
+        await queryCycle()
+      }
+    } else {
+      ElMessage.error('删除失败: ' + response.message)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + error.message)
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 从右键菜单删除边
+const deleteEdgeFromMenu = async () => {
+  if (!contextMenuTarget.value || contextMenuTarget.value.type !== 'edge') return
+  
+  const edgeData = contextMenuTarget.value.data
+  const eid = edgeData.rawData?.eid
+  
+  if (!eid) {
+    ElMessage.error('无法获取边ID')
+    hideContextMenu()
+    return
+  }
+  
+  hideContextMenu()
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除边 ${eid} 吗？`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    loading.value = true
+    const command = ['delete', 'edge', '--eid', eid.toString()]
+    const response = await executeCommand(command)
+
+    if (response.status === 'success') {
+      ElMessage.success('边删除成功')
+      // 刷新当前视图
+      if (activeTab.value === 'fullGraph') {
+        await queryFullGraph()
+      } else if (activeTab.value === 'edge') {
+        await queryEdge()
+      } else if (activeTab.value === 'vertex') {
+        await queryVertex()
+      } else if (activeTab.value === 'cycle' && cycleList.value.length > 0) {
+        await queryCycle()
+      }
+    } else {
+      ElMessage.error('删除失败: ' + response.message)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + error.message)
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 快速插入节点
+const quickInsertNode = async () => {
+  if (!quickInsertVertexForm.vType || !quickInsertVertexForm.vType.trim()) {
+    ElMessage.warning('请输入点类型')
+    return
+  }
+
+  loading.value = true
+  try {
+    const command = [
+      'insert', 'vertex',
+      '--vt', quickInsertVertexForm.vType.trim(),
+      '--bal', quickInsertVertexForm.balance.toString()
+    ]
+
+    const response = await executeCommand(command)
+
+    if (response.status === 'success') {
+      ElMessage.success(`点插入成功: ID=${response.data?.vid || '自动生成'}`)
+      quickInsertDialogVisible.value = false
+      // 刷新全图
+      await queryFullGraph()
+    } else {
+      ElMessage.error('插入失败: ' + response.message)
+    }
+  } catch (error) {
+    ElMessage.error('插入失败: ' + error.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 处理Shift+点击选择节点
+const handleNodeClick = (params, event) => {
+  if (event.event.shiftKey && params.dataType === 'node') {
+    const nodeId = params.data.id
+    
+    // 如果已经选中这个节点，取消选中
+    const index = selectedNodesForEdge.value.indexOf(nodeId)
+    if (index > -1) {
+      selectedNodesForEdge.value.splice(index, 1)
+      ElMessage.info(`取消选中节点 ${nodeId}`)
+      updateNodeSelection()
+      return
+    }
+    
+    // 如果已经选中了2个节点，先清空
+    if (selectedNodesForEdge.value.length >= 2) {
+      selectedNodesForEdge.value = []
+    }
+    
+    // 添加选中的节点
+    selectedNodesForEdge.value.push(nodeId)
+    ElMessage.success(`已选中节点 ${nodeId} (${selectedNodesForEdge.value.length}/2)`)
+    
+    // 如果选中了2个节点，显示连边对话框
+    if (selectedNodesForEdge.value.length === 2) {
+      showQuickEdgeDialog()
+    }
+    
+    updateNodeSelection()
+  }
+}
+
+// 更新节点选中状态的视觉效果
+const updateNodeSelection = () => {
+  if (!chartInstance) return
+  
+  const option = chartInstance.getOption()
+  if (!option.series || !option.series[0]) return
+  
+  // 更新节点样式以显示选中状态
+  const nodes = option.series[0].data.map(node => {
+    const isSelected = selectedNodesForEdge.value.includes(node.id)
+    return {
+      ...node,
+      itemStyle: {
+        ...node.itemStyle,
+        borderColor: isSelected ? '#f56c6c' : '#fff',
+        borderWidth: isSelected ? 4 : 2,
+        shadowBlur: isSelected ? 20 : 10,
+        shadowColor: isSelected ? 'rgba(245, 108, 108, 0.8)' : 'rgba(0, 0, 0, 0.3)'
+      }
+    }
+  })
+  
+  chartInstance.setOption({
+    series: [{
+      data: nodes
+    }]
+  })
+}
+
+// 显示快速连边对话框
+const showQuickEdgeDialog = () => {
+  // 使用对话框而不是直接执行
+  ElMessageBox.prompt(
+    `在节点 ${selectedNodesForEdge.value[0]} 和 ${selectedNodesForEdge.value[1]} 之间创建边\n\n请输入金额:`,
+    '创建边',
+    {
+      confirmButtonText: '创建',
+      cancelButtonText: '取消',
+      inputPattern: /^\d+$/,
+      inputErrorMessage: '请输入有效的数字',
+      inputValue: '1000',
+      inputPlaceholder: '输入金额'
+    }
+  ).then(async ({ value }) => {
+    await quickInsertEdgeBetweenNodes(parseInt(value))
+  }).catch(() => {
+    ElMessage.info('已取消')
+    selectedNodesForEdge.value = []
+    updateNodeSelection()
+  })
+}
+
+// 快速在两个节点之间插入边
+const quickInsertEdgeBetweenNodes = async (amount) => {
+  if (selectedNodesForEdge.value.length !== 2) {
+    ElMessage.warning('请先选择两个节点')
+    return
+  }
+
+  loading.value = true
+  try {
+    const command = [
+      'insert', 'edge',
+      '--src', selectedNodesForEdge.value[0].toString(),
+      '--dst', selectedNodesForEdge.value[1].toString(),
+      '--amt', amount.toString(),
+      '--et', '+'
+    ]
+
+    const response = await executeCommand(command)
+
+    if (response.status === 'success') {
+      ElMessage.success(`边创建成功: ${selectedNodesForEdge.value[0]} → ${selectedNodesForEdge.value[1]}`)
+      selectedNodesForEdge.value = []
+      // 刷新全图
+      await queryFullGraph()
+    } else {
+      ElMessage.error('创建边失败: ' + response.message)
+      selectedNodesForEdge.value = []
+      updateNodeSelection()
+    }
+  } catch (error) {
+    ElMessage.error('创建边失败: ' + error.message)
+    selectedNodesForEdge.value = []
+    updateNodeSelection()
+  } finally {
+    loading.value = false
   }
 }
 
@@ -1098,6 +1595,13 @@ onMounted(() => {
   window.addEventListener('resize', () => {
     if (chartInstance) {
       chartInstance.resize()
+    }
+  })
+  
+  // 添加全局点击事件来隐藏右键菜单
+  window.addEventListener('click', (e) => {
+    if (contextMenuVisible.value) {
+      hideContextMenu()
     }
   })
 
@@ -1221,11 +1725,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
 }
 
 .cycle-info {
   color: #666;
   font-size: 14px;
+  flex: 1;
 }
 
 .cycle-content {
@@ -1245,5 +1751,63 @@ onUnmounted(() => {
 
 .path-tag {
   font-family: 'Courier New', monospace;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px 0;
+  z-index: 9999;
+  min-width: 160px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 14px;
+  color: #606266;
+}
+
+.menu-item:hover {
+  background-color: #f5f7fa;
+  color: #f56c6c;
+}
+
+.menu-item .el-icon {
+  font-size: 16px;
+}
+
+/* 选择提示样式 */
+.selection-hint {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    bottom: 0;
+    opacity: 0;
+  }
+  to {
+    bottom: 30px;
+    opacity: 1;
+  }
+}
+
+.selection-hint .el-tag {
+  padding: 12px 20px;
+  font-size: 14px;
 }
 </style>

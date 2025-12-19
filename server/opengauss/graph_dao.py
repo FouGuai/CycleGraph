@@ -173,6 +173,7 @@ def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> i
         if conn:
             conn.close()
 
+
 def fetch_all(
     sql: str, params: Optional[Tuple] = None, **db_kwargs: Any
 ) -> List[Tuple]:
@@ -204,7 +205,6 @@ def fetch_all(
     finally:
         if conn:
             conn.close()
-
 
 
 def fetch_one(
@@ -273,6 +273,126 @@ def execute_batch(sql: str, params_list: List[Tuple], **db_kwargs: Any) -> int:
     finally:
         if conn:
             conn.close()
+
+
+# 用户个人表
+
+
+def get_user_vertex_table_ddl(username: str) -> str:
+    """返回用户专属 Vertex 表的 CREATE TABLE 语句。
+
+    Args:
+        username: 用户名
+
+    Returns:
+        str: CREATE TABLE DDL
+    """
+    table_name = f"vertex_{username}"
+    return f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        vid       BIGINT PRIMARY KEY,
+        v_type    VARCHAR(256) NOT NULL,
+        create_time BIGINT NOT NULL,
+        balance   BIGINT NOT NULL
+    ) WITH (ORIENTATION = ROW);
+    """
+
+
+def get_user_edge_table_ddl(username: str) -> str:
+    """返回用户专属 Edge 表的 CREATE TABLE 语句。
+
+    Args:
+        username: 用户名
+
+    Returns:
+        str: CREATE TABLE DDL
+    """
+    table_name = f"edge_{username}"
+    return f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        eid        BIGINT PRIMARY KEY,
+        src_vid    BIGINT NOT NULL,
+        dst_vid    BIGINT NOT NULL,
+        amount     BIGINT NOT NULL,
+        occur_time BIGINT NOT NULL,
+        e_type     VARCHAR(256) NOT NULL
+    ) WITH (ORIENTATION = ROW);
+    """
+
+
+def get_user_edge_indexes_ddl(username: str) -> List[str]:
+    """返回用户专属 Edge 表索引的 DDL 列表。
+
+    Args:
+        username: 用户名
+
+    Returns:
+        List[str]: 索引 DDL 列表
+    """
+    table_name = f"edge_{username}"
+    return [
+        f"CREATE INDEX IF NOT EXISTS idx_{table_name}_src_time ON {table_name}(src_vid, occur_time);",
+        f"CREATE INDEX IF NOT EXISTS idx_{table_name}_dst_time ON {table_name}(dst_vid, occur_time);",
+    ]
+
+
+def init_user_tables(username: str, **db_kwargs: Any) -> None:
+    """为用户创建专属的点表和边表。
+
+    Args:
+        username: 用户名
+        **db_kwargs: 数据库连接参数
+
+    Raises:
+        Exception: 数据库操作失败
+    """
+    try:
+        # 1. 创建用户 Vertex 表
+        execute_ddl(get_user_vertex_table_ddl(username), **db_kwargs)
+
+        # 2. 创建用户 Edge 表
+        execute_ddl(get_user_edge_table_ddl(username), **db_kwargs)
+
+        # 3. 创建用户 Edge 索引
+        for idx_sql in get_user_edge_indexes_ddl(username):
+            execute_ddl(idx_sql, **db_kwargs)
+
+    except Exception as e:
+        raise Exception(f"创建用户 {username} 的表失败: {e}") from e
+
+
+def verify_user_tables(username: str, **db_kwargs: Any) -> bool:
+    """验证用户的点表和边表是否存在。
+
+    Args:
+        username: 用户名
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        bool: 表都存在返回 True，否则返回 False
+    """
+    try:
+        vertex_table = f"vertex_{username}"
+        edge_table = f"edge_{username}"
+
+        tables = fetch_all(
+            """
+            SELECT tablename FROM pg_tables 
+            WHERE schemaname = 'public' AND tablename IN (%s, %s);
+        """,
+            (vertex_table, edge_table),
+            **db_kwargs,
+        )
+
+        table_names = [t[0] for t in tables]
+        return vertex_table in table_names and edge_table in table_names
+
+    except Exception:
+        return False
+
+
+def get_user_table_name(username: str) -> Tuple[str, str]:
+    return f"vertex_{username}", f"edge_{username}"
 
 
 # ==================== 便捷测试函数 ====================

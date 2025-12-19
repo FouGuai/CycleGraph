@@ -73,8 +73,6 @@ def get_user_indexes_ddl() -> List[str]:
 def get_drop_tables_ddl() -> List[str]:
     """返回删除所有表的 DDL 列表。"""
     return [
-        "DROP TABLE IF EXISTS edge CASCADE;",
-        "DROP TABLE IF EXISTS vertex CASCADE;",
         "DROP TABLE IF EXISTS users CASCADE;",
     ]
 
@@ -92,27 +90,9 @@ def init_schema(**db_kwargs: Any) -> None:
         Exception: 数据库操作失败
     """
     try:
-        # 1. 创建 Vertex 表
-        execute_ddl(get_vertex_table_ddl(), **db_kwargs)
-        print("✓ Vertex 表创建成功")
-
-        # 2. 创建 Edge 表
-        execute_ddl(get_edge_table_ddl(), **db_kwargs)
-        print("✓ Edge 表创建成功")
-
-        # 3. 创建 User 表
+        # 1. 创建 User 表
         execute_ddl(get_user_table_ddl(), **db_kwargs)
         print("✓ Users 表创建成功")
-
-        # 4. 创建 Edge 索引
-        for idx_sql in get_edge_indexes_ddl():
-            execute_ddl(idx_sql, **db_kwargs)
-        print("✓ Edge 表索引创建成功")
-
-        # 5. 创建 User 索引
-        for idx_sql in get_user_indexes_ddl():
-            execute_ddl(idx_sql, **db_kwargs)
-        print("✓ Users 表索引创建成功")
 
         print("✓ Schema 初始化完成")
 

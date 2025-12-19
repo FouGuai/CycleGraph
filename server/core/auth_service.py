@@ -50,6 +50,10 @@ def register_user(username: str, password: str, **db_kwargs: Any) -> Dict[str, A
             (username, password_hash, created_at),
             **db_kwargs,
         )
+        
+        # 为用户创建专属的点表和边表
+        from server.opengauss.graph_dao import init_user_tables
+        init_user_tables(username, **db_kwargs)
 
         return {
             "status": "success",
@@ -87,6 +91,17 @@ def login_user(username: str, password: str, **db_kwargs: Any) -> Dict[str, Any]
         # 验证密码
         if user.password_hash != hash_password(password):
             return {"status": "error", "message": "Wrong username or password"}
+        
+        # 验证用户的点表和边表是否存在，如果不存在则创建
+        from server.opengauss.graph_dao  import verify_user_tables, init_user_tables
+        if not verify_user_tables(username, **db_kwargs):
+            try:
+                init_user_tables(username, **db_kwargs)
+            except Exception as table_error:
+                return {
+                    "status": "error",
+                    "message": f"Failed to initialize user tables: {table_error}"
+                }
 
         # 生成令牌
         token = generate_token()

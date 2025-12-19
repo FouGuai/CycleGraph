@@ -18,8 +18,13 @@ from server.core.auth_service import verify_token, clear_token
 app = Flask(__name__)
 
 
+class RequestContext:
+    def __init__(self, username: str) -> None:
+        self.username = username
+
+
 # 不需要验证 token 的命令
-NO_AUTH_COMMANDS = {"register", "login"}
+NO_AUTH_COMMANDS = {"register", "login", "logout"}
 
 
 @app.route("/execute", methods=["POST"])
@@ -70,10 +75,12 @@ def execute():
         command_name = command[0] if command else ""
 
         # register, login 不需要验证
+        username = None
         if command_name not in NO_AUTH_COMMANDS:
             # 其他命令需要验证 token
             username = verify_token(token) if token else None
             if not username:
+                print(f"invalid token {token}")
                 return (
                     jsonify(
                         {
@@ -84,8 +91,8 @@ def execute():
                     401,
                 )
 
-        # 执行命令
-        result = execute_command(command)
+        # 执行命令，传入 username
+        result = execute_command(command, username=username)
 
         # 创建响应
         response = make_response(jsonify(result))

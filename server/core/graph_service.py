@@ -5,7 +5,14 @@
 
 import time
 from typing import List, Dict, Any, Optional
-from server.opengauss.graph_dao import execute_dml, fetch_all, fetch_one, Vertex, Edge
+from server.opengauss.graph_dao import (
+    execute_dml,
+    fetch_all,
+    fetch_one,
+    Vertex,
+    Edge,
+    get_user_table_name,
+)
 
 import server.core.bibfs as cycle_ag
 import server.core.membibfs as mem_cycle_ag
@@ -15,6 +22,7 @@ import server.core.membibfs as mem_cycle_ag
 
 
 def query_vertices(
+    username: str,
     vid: Optional[int] = None,
     v_types: Optional[List[str]] = None,
     min_create_time: Optional[int] = None,
@@ -23,7 +31,11 @@ def query_vertices(
     max_balance: Optional[int] = None,
     **db_kwargs: Any,
 ) -> Dict[str, Any]:
-    """查询点。"""
+    """查询点。
+
+    Args:
+        username: 用户名，用于确定查询哪个用户的表
+    """
     try:
         conditions = []
         params = []
@@ -53,7 +65,8 @@ def query_vertices(
             conditions.append("balance <= %s")
             params.append(max_balance)
 
-        sql = "SELECT vid, v_type, create_time, balance FROM vertex"
+        vertex_table_name, _ = get_user_table_name(username)
+        sql = f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name}"
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
 
@@ -72,14 +85,20 @@ def query_vertices(
 
 
 def insert_vertex(
+    username: str,
     v_type: str,
     vid: Optional[int] = None,
     create_time: Optional[int] = None,
     balance: int = 0,
     **db_kwargs: Any,
 ) -> Dict[str, Any]:
-    """插入点。"""
+    """插入点。
+
+    Args:
+        username: 用户名，用于确定操作哪个用户的表
+    """
     try:
+        vertex_table_name, _ = get_user_table_name(username)
         # 验证输入
         if not v_type or (isinstance(v_type, str) and not v_type.strip()):
             return {"status": "error", "message": "Vertex type cannot be empty"}
@@ -93,7 +112,7 @@ def insert_vertex(
 
             # 检查ID是否已存在
             existing = fetch_one(
-                "SELECT 1 FROM vertex WHERE vid = %s", (vid,), **db_kwargs
+                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s", (vid,), **db_kwargs
             )
             if existing:
                 return {"status": "error", "message": f"Vertex {vid} already exists"}
@@ -110,7 +129,7 @@ def insert_vertex(
         # 如果未指定 vid，生成一个
         if vid is None:
             # 获取当前最大 vid
-            result = fetch_one("SELECT MAX(vid) FROM vertex", **db_kwargs)
+            result = fetch_one(f"SELECT MAX(vid) FROM {vertex_table_name}", **db_kwargs)
             max_vid = result[0] if result and result[0] is not None else 0
             vid = max_vid + 1
 
@@ -120,7 +139,7 @@ def insert_vertex(
 
         # 插入点
         execute_dml(
-            "INSERT INTO vertex (vid, v_type, create_time, balance) VALUES (%s, %s, %s, %s)",
+            f"INSERT INTO {vertex_table_name} (vid, v_type, create_time, balance) VALUES (%s, %s, %s, %s)",
             (vid, v_type, create_time, balance),
             **db_kwargs,
         )
@@ -148,6 +167,7 @@ def insert_vertex(
 
 
 def query_edges(
+    username: str,
     eid: Optional[int] = None,
     src_vid: Optional[int] = None,
     dst_vid: Optional[int] = None,
@@ -158,8 +178,13 @@ def query_edges(
     max_occur_time: Optional[int] = None,
     **db_kwargs: Any,
 ) -> Dict[str, Any]:
-    """查询边。"""
+    """查询边。
+
+    Args:
+        username: 用户名，用于确定查询哪个用户的表
+    """
     try:
+        _, edge_table_name = get_user_table_name(username)
         conditions = []
         params = []
 
@@ -196,7 +221,7 @@ def query_edges(
             conditions.append("occur_time <= %s")
             params.append(max_occur_time)
 
-        sql = "SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM edge"
+        sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name}"
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
 
@@ -215,19 +240,29 @@ def query_edges(
 
 
 def insert_edge(
-    eid: int,
+    username: str,
+    eid: Optional[int],
     src_vid: int,
     dst_vid: int,
-    amount : int,
+    amount: int,
     occur_time: Optional[int] = None,
     e_type: int = 0,
     create_vertices: bool = False,
     **db_kwargs: Any,
 ) -> Dict[str, Any]:
-    """插入边。"""
+    """插入边。
+
+    Args:
+        username: 用户名，用于确定操作哪个用户的表
+    """
     try:
-        # 验证输入
-        if not isinstance(eid, int) or eid <= 0:
+        vertex_table_name, edge_table_name = get_user_table_name(username)
+        if eid is None:
+            # 获取当前最大 vid
+            result = fetch_one(f"SELECT MAX(eid) FROM {edge_table_name}", **db_kwargs)
+            max_eid = result[0] if result and result[0] is not None else 0
+            eid = max_eid + 1
+        elif not isinstance(eid, int) or eid <= 0:
             return {"status": "error", "message": "Edge ID must be a positive integer"}
 
         if not isinstance(src_vid, int) or src_vid <= 0:
@@ -256,7 +291,7 @@ def insert_edge(
 
         # 检查边ID是否已存在
         existing_edge = fetch_one(
-            "SELECT 1 FROM edge WHERE eid = %s", (eid,), **db_kwargs
+            f"SELECT 1 FROM {edge_table_name} WHERE eid = %s", (eid,), **db_kwargs
         )
         if existing_edge:
             return {"status": "error", "message": f"Edge {eid} already exists"}
@@ -269,21 +304,27 @@ def insert_edge(
         if create_vertices:
             # 检查源点是否存在
             src_exists = fetch_one(
-                "SELECT 1 FROM vertex WHERE vid = %s", (src_vid,), **db_kwargs
+                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                (src_vid,),
+                **db_kwargs,
             )
             if not src_exists:
-                insert_vertex(v_type="auto", vid=src_vid, **db_kwargs)
+                insert_vertex(username, v_type="auto", vid=src_vid, **db_kwargs)
 
             # 检查目标点是否存在
             dst_exists = fetch_one(
-                "SELECT 1 FROM vertex WHERE vid = %s", (dst_vid,), **db_kwargs
+                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                (dst_vid,),
+                **db_kwargs,
             )
             if not dst_exists:
-                insert_vertex(v_type="auto", vid=dst_vid, **db_kwargs)
+                insert_vertex(username, v_type="auto", vid=dst_vid, **db_kwargs)
         else:
             # 验证点是否存在
             src_exists = fetch_one(
-                "SELECT 1 FROM vertex WHERE vid = %s", (src_vid,), **db_kwargs
+                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                (src_vid,),
+                **db_kwargs,
             )
             if not src_exists:
                 return {
@@ -292,7 +333,9 @@ def insert_edge(
                 }
 
             dst_exists = fetch_one(
-                "SELECT 1 FROM vertex WHERE vid = %s", (dst_vid,), **db_kwargs
+                f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s",
+                (dst_vid,),
+                **db_kwargs,
             )
             if not dst_exists:
                 return {
@@ -302,7 +345,7 @@ def insert_edge(
 
         # 插入边
         execute_dml(
-            "INSERT INTO edge (eid, src_vid, dst_vid, amount, occur_time, e_type) VALUES (%s, %s, %s, %s, %s, %s)",
+            f"INSERT INTO {edge_table_name} (eid, src_vid, dst_vid, amount, occur_time, e_type) VALUES (%s, %s, %s, %s, %s, %s)",
             (eid, src_vid, dst_vid, amount, occur_time, e_type),
             **db_kwargs,
         )
@@ -334,6 +377,7 @@ def insert_edge(
 
 
 def query_cycles(
+    username: str,
     start_vid: int,
     max_depth: int,
     direction: str = "forward",
@@ -348,8 +392,9 @@ def query_cycles(
     use_memory: bool = True,
 ) -> Dict[str, Any]:
     """查询环路。
-    
+
     Args:
+        username: 用户名，用于确定查询哪个用户的表
         use_memory: 是否使用内存版本(默认True)。内存版本会先加载数据到内存，
                    适合数据库访问较慢的场景；False则使用数据库临时表版本。
     """
@@ -411,6 +456,7 @@ def query_cycles(
         return mem_cycle_ag.query_cycles(
             start_vid,
             max_depth,
+            username,
             direction,
             vertex_filter_v_type,
             vertex_filter_min_balance,
@@ -438,10 +484,11 @@ def query_cycles(
 
 
 # 在文件末尾添加删除函数
-def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
+def delete_vertex(username: str, vid: int, **db_kwargs: Any) -> Dict[str, Any]:
     """删除点及其相关的所有边。
 
     Args:
+        username: 用户名，用于确定操作哪个用户的表
         vid: 要删除的点ID
         **db_kwargs: 数据库连接参数
 
@@ -449,6 +496,7 @@ def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
         Dict: 删除结果
     """
     try:
+        vertex_table_name, edge_table_name = get_user_table_name(username)
         # 验证输入
         if not isinstance(vid, int) or vid <= 0:
             return {
@@ -457,13 +505,15 @@ def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
             }
 
         # 检查点是否存在
-        existing = fetch_one("SELECT 1 FROM vertex WHERE vid = %s", (vid,), **db_kwargs)
+        existing = fetch_one(
+            f"SELECT 1 FROM {vertex_table_name} WHERE vid = %s", (vid,), **db_kwargs
+        )
         if not existing:
             return {"status": "error", "message": f"Vertex {vid} does not exist"}
 
         # 统计相关边的数量
         edge_count_result = fetch_one(
-            "SELECT COUNT(*) FROM edge WHERE src_vid = %s OR dst_vid = %s",
+            f"SELECT COUNT(*) FROM {edge_table_name} WHERE src_vid = %s OR dst_vid = %s",
             (vid, vid),
             **db_kwargs,
         )
@@ -471,13 +521,15 @@ def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
 
         # 删除相关的边（作为源点或目标点）
         execute_dml(
-            "DELETE FROM edge WHERE src_vid = %s OR dst_vid = %s",
+            f"DELETE FROM {edge_table_name} WHERE src_vid = %s OR dst_vid = %s",
             (vid, vid),
             **db_kwargs,
         )
 
         # 删除点
-        execute_dml("DELETE FROM vertex WHERE vid = %s", (vid,), **db_kwargs)
+        execute_dml(
+            f"DELETE FROM {vertex_table_name} WHERE vid = %s", (vid,), **db_kwargs
+        )
 
         return {
             "status": "success",
@@ -489,10 +541,11 @@ def delete_vertex(vid: int, **db_kwargs: Any) -> Dict[str, Any]:
         return {"status": "error", "message": f"Delete vertex failed: {e}"}
 
 
-def delete_edge(eid: int, **db_kwargs: Any) -> Dict[str, Any]:
+def delete_edge(username: str, eid: int, **db_kwargs: Any) -> Dict[str, Any]:
     """删除边。
 
     Args:
+        username: 用户名，用于确定操作哪个用户的表
         eid: 要删除的边ID
         **db_kwargs: 数据库连接参数
 
@@ -500,6 +553,7 @@ def delete_edge(eid: int, **db_kwargs: Any) -> Dict[str, Any]:
         Dict: 删除结果
     """
     try:
+        _, edge_table_name = get_user_table_name(username)
         # 验证输入
         if not isinstance(eid, int) or eid <= 0:
             return {"status": "error", "message": "Edge ID must be a positive integer"}
@@ -511,7 +565,7 @@ def delete_edge(eid: int, **db_kwargs: Any) -> Dict[str, Any]:
 
         # 删除边
         rows_affected = execute_dml(
-            "DELETE FROM edge WHERE eid = %s", (eid,), **db_kwargs
+            f"DELETE FROM {edge_table_name} WHERE eid = %s", (eid,), **db_kwargs
         )
 
         if rows_affected > 0:

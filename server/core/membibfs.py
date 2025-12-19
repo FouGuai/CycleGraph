@@ -12,12 +12,14 @@ from server.opengauss.graph_dao import (
     fetch_one,
     Vertex,
     Edge,
+    get_user_table_name,
 )
 
 
 def query_cycles(
     start_vid: int,
     max_depth: int,
+    username: str,
     direction: str = "forward",
     vertex_filter_v_types: Optional[List[str]] = None,
     vertex_filter_min_balance: Optional[int] = None,
@@ -49,10 +51,10 @@ def query_cycles(
         Dict: 包含status, found, data(环列表), meta等信息
     """
     start_time = time.time()
-
+    print(username)
     try:
         # 1. 验证起始点存在
-        start_vertex = _get_vertex(start_vid, **db_kwargs)
+        start_vertex = _get_vertex(start_vid, username, **db_kwargs)
         if not start_vertex:
             return {"status": "error", "message": f"Start vertex {start_vid} not found"}
 
@@ -73,6 +75,7 @@ def query_cycles(
             edge_filter_e_types,
             edge_filter_min_amount,
             edge_filter_max_amount,
+            username,
             **db_kwargs,
         )
 
@@ -125,6 +128,7 @@ def _load_graph_data(
     edge_filter_e_types: Optional[List[str]],
     edge_filter_min_amount: Optional[int],
     edge_filter_max_amount: Optional[int],
+    username: str,
     **db_kwargs: Any,
 ) -> Tuple[Dict[int, Vertex], Dict[int, List[Edge]], Dict[int, List[Edge]]]:
     """一次性加载所有符合条件的点和边数据到内存。
@@ -137,7 +141,7 @@ def _load_graph_data(
     # 1. 加载点数据
     vertex_conditions = []
     vertex_params = []
-
+    vertex_table_name, edge_table_name = get_user_table_name(username)
     if vertex_filter_v_types:
         placeholders = ",".join(["%s"] * len(vertex_filter_v_types))
         vertex_conditions.append(f"v_type IN ({placeholders})")
@@ -147,11 +151,13 @@ def _load_graph_data(
         vertex_conditions.append("balance >= %s")
         vertex_params.append(vertex_filter_min_balance)
 
-    vertex_sql = "SELECT vid, v_type, create_time, balance FROM vertex"
+    vertex_sql = f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name}"
     if vertex_conditions:
         vertex_sql += " WHERE " + " AND ".join(vertex_conditions)
 
-    vertex_rows = fetch_all(vertex_sql, tuple(vertex_params) if vertex_params else None, **db_kwargs)
+    vertex_rows = fetch_all(
+        vertex_sql, tuple(vertex_params) if vertex_params else None, **db_kwargs
+    )
     vertices_map = {row[0]: Vertex.from_tuple(row) for row in vertex_rows}
 
     # 2. 加载边数据
@@ -171,11 +177,13 @@ def _load_graph_data(
         edge_conditions.append("amount <= %s")
         edge_params.append(edge_filter_max_amount)
 
-    edge_sql = "SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM edge"
+    edge_sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name}"
     if edge_conditions:
         edge_sql += " WHERE " + " AND ".join(edge_conditions)
 
-    edge_rows = fetch_all(edge_sql, tuple(edge_params) if edge_params else None, **db_kwargs)
+    edge_rows = fetch_all(
+        edge_sql, tuple(edge_params) if edge_params else None, **db_kwargs
+    )
 
     # 3. 构建邻接表
     edges_out = defaultdict(list)  # src_vid -> [Edge]
@@ -213,9 +221,13 @@ def _memory_bidirectional_bfs(
 
     # 正向搜索状态: vid -> (parent_vid, edge, depth, path_vids, path_edges_full, occur_time)
     # path_edges_full 存储完整的 Edge 对象
-    fwd_state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]] = {}
+    fwd_state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ] = {}
     # 反向搜索状态: vid -> (parent_vid, edge, depth, path_vids, path_edges_full, occur_time)
-    bwd_state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]] = {}
+    bwd_state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ] = {}
 
     # 初始化起点
     fwd_state[start_vid] = (None, None, 0, [start_vid], [], 0)
@@ -296,7 +308,9 @@ def _memory_bidirectional_bfs(
 
 def _expand_forward_memory(
     frontier: Set[int],
-    state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]],
+    state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ],
     edges_out: Dict[int, List[Edge]],
     direction: str,
     target_depth: int,
@@ -345,7 +359,9 @@ def _expand_forward_memory(
 
 def _expand_backward_memory(
     frontier: Set[int],
-    state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]],
+    state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ],
     edges_in: Dict[int, List[Edge]],
     direction: str,
     target_depth: int,
@@ -364,7 +380,11 @@ def _expand_backward_memory(
 
         for edge in in_edges:
             # 时序过滤(反向搜索时间更早)
-            if direction == "forward" and occur_time != 0 and edge.occur_time >= occur_time:
+            if (
+                direction == "forward"
+                and occur_time != 0
+                and edge.occur_time >= occur_time
+            ):
                 continue
 
             # 避免重复访问已在路径中的点
@@ -393,8 +413,12 @@ def _expand_backward_memory(
 
 
 def _detect_cycles_memory(
-    fwd_state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]],
-    bwd_state: Dict[int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]],
+    fwd_state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ],
+    bwd_state: Dict[
+        int, Tuple[Optional[int], Optional[Edge], int, List[int], List[Edge], int]
+    ],
     start_vid: int,
     edges_out: Dict[int, List[Edge]],
     edges_in: Dict[int, List[Edge]],
@@ -508,9 +532,11 @@ def _get_cycle_details_from_memory(
 
 
 def _get_cycle_details(
-    cycle_path: List[Tuple[int, int, int]], **db_kwargs: Any
+    cycle_path: List[Tuple[int, int, int]], username: str, **db_kwargs: Any
 ) -> Tuple[List[Dict], List[Dict]]:
     """获取环路中所有点和边的详细信息(从数据库)。"""
+
+    vertex_table_name, edge_table_name = get_user_table_name(username)
     # 收集所有vid和eid
     vids = set([cycle_path[0][0]])  # 起点
     eids = []
@@ -521,23 +547,24 @@ def _get_cycle_details(
     # 查询点信息
     vids_list = list(vids)
     vids_str = ",".join(map(str, vids_list))
-    vertices_sql = f"SELECT vid, v_type, create_time, balance FROM vertex WHERE vid IN ({vids_str})"
+    vertices_sql = f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid IN ({vids_str})"
     vertices_data = fetch_all(vertices_sql, **db_kwargs)
     vertices = [Vertex.from_tuple(v).to_dict() for v in vertices_data]
 
     # 查询边信息
     eids_str = ",".join(map(str, eids))
-    edges_sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM edge WHERE eid IN ({eids_str})"
+    edges_sql = f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name} WHERE eid IN ({eids_str})"
     edges_data = fetch_all(edges_sql, **db_kwargs)
     edges = [Edge.from_tuple(e).to_dict() for e in edges_data]
 
     return vertices, edges
 
 
-def _get_vertex(vid: int, **db_kwargs: Any) -> Optional[Vertex]:
+def _get_vertex(vid: int, username: str, **db_kwargs: Any) -> Optional[Vertex]:
     """获取点信息。"""
+    vertex_table_name, _ = get_user_table_name(username)
     result = fetch_one(
-        "SELECT vid, v_type, create_time, balance FROM vertex WHERE vid = %s",
+        f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid = %s",
         (vid,),
         **db_kwargs,
     )
@@ -557,39 +584,45 @@ def _vertex_matches_filter(
 
 def _get_cycle_signature(cycle: List[Tuple[int, int, int, Edge]]) -> Tuple:
     """生成环路的唯一签名，用于去重。
-    
+
     同一个环路，无论从哪个点开始，正向还是反向遍历，都应该生成相同的签名。
     例如: 1->2->3->1, 2->3->1->2, 3->1->2->3 是同一个环
           1->2->3->1 和 1->3->2->1 也是同一个环（反向）
-    
+
     Args:
         cycle: 环路，格式为 [(src_vid, dst_vid, eid, edge_obj), ...]
-    
+
     Returns:
         环路的归一化签名
     """
     if not cycle:
         return tuple()
-    
+
     # 提取边ID序列
     edge_ids = [eid for _, _, eid, _ in cycle]
-    
+
     # 找到最小边ID的位置，作为归一化起点
     min_eid = min(edge_ids)
     min_idx = edge_ids.index(min_eid)
-    
+
     # 从最小边ID开始的正向序列
     normalized_forward = tuple(edge_ids[min_idx:] + edge_ids[:min_idx])
-    
+
     # 从最小边ID开始的反向序列
     # 反向时，从最小边ID位置开始，逆序遍历
-    reversed_sequence = edge_ids[:min_idx+1][::-1] + edge_ids[min_idx+1:][::-1]
+    reversed_sequence = edge_ids[: min_idx + 1][::-1] + edge_ids[min_idx + 1 :][::-1]
     if reversed_sequence:
         # 调整使得最小边ID在开头
         rev_min_idx = reversed_sequence.index(min_eid)
-        normalized_reverse = tuple(reversed_sequence[rev_min_idx:] + reversed_sequence[:rev_min_idx])
+        normalized_reverse = tuple(
+            reversed_sequence[rev_min_idx:] + reversed_sequence[:rev_min_idx]
+        )
     else:
         normalized_reverse = tuple()
-    
+
     # 返回字典序较小的那个作为唯一签名
-    return min(normalized_forward, normalized_reverse) if normalized_reverse else normalized_forward
+    return (
+        min(normalized_forward, normalized_reverse)
+        if normalized_reverse
+        else normalized_forward
+    )
