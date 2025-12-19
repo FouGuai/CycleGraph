@@ -408,7 +408,7 @@ def query_cycles(
     limit: int = 10,
     allow_duplicate_vertices: bool = False,
     allow_duplicate_edges: bool = False,
-    use_memory: bool = False,
+    use_memory: bool = True,
 ) -> Dict[str, Any]:
     """查询环路。
 
