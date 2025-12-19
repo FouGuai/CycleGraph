@@ -579,3 +579,202 @@ def delete_edge(username: str, eid: int, **db_kwargs: Any) -> Dict[str, Any]:
 
     except Exception as e:
         return {"status": "error", "message": f"Delete edge failed: {e}"}
+
+
+def update_vertex(
+    username: str,
+    vid: int,
+    v_type: Optional[str] = None,
+    balance: Optional[int] = None,
+    **db_kwargs: Any,
+) -> Dict[str, Any]:
+    """更新点的属性。
+
+    Args:
+        username: 用户名，用于确定操作哪个用户的表
+        vid: 要更新的点ID（必需）
+        v_type: 新的点类型（可选）
+        balance: 新的余额（可选）
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        Dict: 更新结果
+    """
+    try:
+        vertex_table_name, _ = get_user_table_name(username)
+        # 验证点ID
+        if not isinstance(vid, int) or vid <= 0:
+            return {
+                "status": "error",
+                "message": "Vertex ID must be a positive integer",
+            }
+
+        # 检查点是否存在
+        existing = fetch_one(
+            f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid = %s",
+            (vid,),
+            **db_kwargs,
+        )
+        if not existing:
+            return {"status": "error", "message": f"Vertex {vid} does not exist"}
+
+        # 至少需要提供一个要更新的字段
+        if v_type is None and balance is None:
+            return {
+                "status": "error",
+                "message": "At least one field must be provided for update",
+            }
+
+        # 验证新值
+        if v_type is not None:
+            if not isinstance(v_type, str) or not v_type.strip():
+                return {"status": "error", "message": "Vertex type cannot be empty"}
+
+        if balance is not None:
+            if not isinstance(balance, int) or balance < 0:
+                return {
+                    "status": "error",
+                    "message": "Balance must be a non-negative integer",
+                }
+
+        # 构建更新语句
+        update_fields = []
+        params = []
+
+        if v_type is not None:
+            update_fields.append("v_type = %s")
+            params.append(v_type)
+
+        if balance is not None:
+            update_fields.append("balance = %s")
+            params.append(balance)
+
+        params.append(vid)
+
+        sql = f"UPDATE {vertex_table_name} SET {', '.join(update_fields)} WHERE vid = %s"
+        execute_dml(sql, tuple(params), **db_kwargs)
+
+        # 查询更新后的数据
+        updated = fetch_one(
+            f"SELECT vid, v_type, create_time, balance FROM {vertex_table_name} WHERE vid = %s",
+            (vid,),
+            **db_kwargs,
+        )
+
+        assert updated is not None
+        updated_vertex = Vertex.from_tuple(updated)
+
+        return {
+            "status": "success",
+            "message": f"Vertex {vid} updated successfully.",
+            "data": updated_vertex.to_dict(),
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Update vertex failed: {e}"}
+
+
+def update_edge(
+    username: str,
+    eid: int,
+    amount: Optional[int] = None,
+    occur_time: Optional[int] = None,
+    e_type: Optional[str] = None,
+    **db_kwargs: Any,
+) -> Dict[str, Any]:
+    """更新边的属性。
+
+    Args:
+        username: 用户名，用于确定操作哪个用户的表
+        eid: 要更新的边ID（必需）
+        amount: 新的交易金额（可选）
+        occur_time: 新的发生时间（可选）
+        e_type: 新的边类型（可选）
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        Dict: 更新结果
+    """
+    try:
+        _, edge_table_name = get_user_table_name(username)
+        # 验证边ID
+        if not isinstance(eid, int) or eid <= 0:
+            return {
+                "status": "error",
+                "message": "Edge ID must be a positive integer",
+            }
+
+        # 检查边是否存在
+        existing = fetch_one(
+            f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name} WHERE eid = %s",
+            (eid,),
+            **db_kwargs,
+        )
+        if not existing:
+            return {"status": "error", "message": f"Edge {eid} does not exist"}
+
+        # 至少需要提供一个要更新的字段
+        if amount is None and occur_time is None and e_type is None:
+            return {
+                "status": "error",
+                "message": "At least one field must be provided for update",
+            }
+
+        # 验证新值
+        if amount is not None:
+            if not isinstance(amount, int) or amount < 0:
+                return {
+                    "status": "error",
+                    "message": "Amount must be a non-negative integer",
+                }
+
+        if occur_time is not None:
+            if not isinstance(occur_time, int) or occur_time <= 0:
+                return {
+                    "status": "error",
+                    "message": "Occur time must be a positive integer",
+                }
+
+        if e_type is not None:
+            if not isinstance(e_type, str) or not e_type.strip():
+                return {"status": "error", "message": "Edge type cannot be empty"}
+
+        # 构建更新语句
+        update_fields = []
+        params = []
+
+        if amount is not None:
+            update_fields.append("amount = %s")
+            params.append(amount)
+
+        if occur_time is not None:
+            update_fields.append("occur_time = %s")
+            params.append(occur_time)
+
+        if e_type is not None:
+            update_fields.append("e_type = %s")
+            params.append(e_type)
+
+        params.append(eid)
+
+        sql = f"UPDATE {edge_table_name} SET {', '.join(update_fields)} WHERE eid = %s"
+        execute_dml(sql, tuple(params), **db_kwargs)
+
+        # 查询更新后的数据
+        updated = fetch_one(
+            f"SELECT eid, src_vid, dst_vid, amount, occur_time, e_type FROM {edge_table_name} WHERE eid = %s",
+            (eid,),
+            **db_kwargs,
+        )
+
+        assert updated is not None
+        updated_edge = Edge.from_tuple(updated)
+
+        return {
+            "status": "success",
+            "message": f"Edge {eid} updated successfully.",
+            "data": updated_edge.to_dict(),
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Update edge failed: {e}"}

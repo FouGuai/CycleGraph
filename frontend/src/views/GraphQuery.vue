@@ -347,17 +347,33 @@
                     </div>
                   </template>
                   <div class="context-menu-content">
-                    <div v-if="contextMenuTarget?.type === 'node'" class="menu-item" @click="deleteNodeFromMenu">
-                      <el-icon color="#f56c6c">
-                        <Delete />
-                      </el-icon>
-                      <span>删除节点 {{ contextMenuTarget.data.id }}</span>
+                    <div v-if="contextMenuTarget?.type === 'node'">
+                      <div class="menu-item" @click="openEditDialog('vertex')">
+                        <el-icon color="#409eff">
+                          <Edit />
+                        </el-icon>
+                        <span>编辑属性</span>
+                      </div>
+                      <div class="menu-item" @click="deleteNodeFromMenu">
+                        <el-icon color="#f56c6c">
+                          <Delete />
+                        </el-icon>
+                        <span>删除节点 {{ contextMenuTarget.data.id }}</span>
+                      </div>
                     </div>
-                    <div v-if="contextMenuTarget?.type === 'edge'" class="menu-item" @click="deleteEdgeFromMenu">
-                      <el-icon color="#f56c6c">
-                        <Delete />
-                      </el-icon>
-                      <span>删除边 {{ contextMenuTarget.data.rawData?.eid }}</span>
+                    <div v-if="contextMenuTarget?.type === 'edge'">
+                      <div class="menu-item" @click="openEditDialog('edge')">
+                        <el-icon color="#409eff">
+                          <Edit />
+                        </el-icon>
+                        <span>编辑属性</span>
+                      </div>
+                      <div class="menu-item" @click="deleteEdgeFromMenu">
+                        <el-icon color="#f56c6c">
+                          <Delete />
+                        </el-icon>
+                        <span>删除边 {{ contextMenuTarget.data.rawData?.eid }}</span>
+                      </div>
                     </div>
                     <div v-if="contextMenuTarget?.type === 'blank'" class="menu-item" @click="showQuickInsertDialog">
                       <el-icon color="#67c23a">
@@ -416,6 +432,62 @@
               <template #footer>
                 <el-button @click="cancelQuickEdge">取消</el-button>
                 <el-button type="primary" @click="confirmQuickEdge" :loading="loading">创建</el-button>
+              </template>
+            </el-dialog>
+
+            <!-- 编辑属性对话框 -->
+            <el-dialog 
+              v-model="editDialogVisible" 
+              :title="editType === 'vertex' ? '编辑节点属性' : '编辑边属性'" 
+              width="500px"
+              :close-on-click-modal="false"
+              @close="resetEditForm"
+            >
+              <!-- 编辑节点 -->
+              <el-form v-if="editType === 'vertex'" :model="editForm" label-width="100px">
+                <el-form-item label="点ID">
+                  <el-input v-model="editForm.vid" disabled />
+                </el-form-item>
+                <el-form-item label="点类型">
+                  <el-input v-model="editForm.vType" placeholder="输入点类型" clearable />
+                </el-form-item>
+                <el-form-item label="余额">
+                  <el-input v-model="editForm.balance" placeholder="输入余额" clearable />
+                </el-form-item>
+              </el-form>
+
+              <!-- 编辑边 -->
+              <el-form v-if="editType === 'edge'" :model="editForm" label-width="100px">
+                <el-form-item label="边ID">
+                  <el-input v-model="editForm.eid" disabled />
+                </el-form-item>
+                <el-form-item label="源点ID">
+                  <el-input v-model="editForm.srcVid" disabled />
+                </el-form-item>
+                <el-form-item label="目标点ID">
+                  <el-input v-model="editForm.dstVid" disabled />
+                </el-form-item>
+                <el-form-item label="边类型">
+                  <el-input v-model="editForm.eType" placeholder="输入边类型" clearable />
+                </el-form-item>
+                <el-form-item label="金额">
+                  <el-input v-model="editForm.amount" placeholder="输入金额" clearable />
+                </el-form-item>
+                <el-form-item label="发生时间">
+                  <el-date-picker
+                    v-model="editForm.occurTime"
+                    type="datetime"
+                    placeholder="选择时间"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-form>
+
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="editDialogVisible = false">取消</el-button>
+                  <el-button type="primary" @click="handleUpdate" :loading="loading">更新</el-button>
+                </span>
               </template>
             </el-dialog>
 
@@ -492,7 +564,7 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete, Connection
+  Search, DataAnalysis, PieChart, RefreshRight, Download, Box, Operation, Plus, Delete, Connection, Edit
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { executeCommand } from '@/api/graph'
@@ -597,6 +669,24 @@ const quickInsertEdgeForm = reactive({
   eType: '+',
   occurTime: null
 })
+
+// 编辑对话框相关状态
+const editDialogVisible = ref(false)
+const editType = ref('') // 'vertex' or 'edge'
+const editForm = reactive({
+  // 节点编辑字段
+  vid: '',
+  vType: '',
+  balance: '',
+  // 边编辑字段
+  eid: '',
+  srcVid: '',
+  dstVid: '',
+  eType: '',
+  amount: '',
+  occurTime: null // Date对象（毫秒时间戳）
+})
+const originalEditData = ref(null) // 保存原始数据用于对比
 
 // 时间格式化辅助函数
 const formatTimestamp = (timestamp) => {
@@ -1542,6 +1632,207 @@ const deleteEdgeFromMenu = async () => {
   }
 }
 
+// 打开编辑对话框
+const openEditDialog = (type) => {
+  if (!contextMenuTarget.value) return
+
+  editType.value = type
+  const data = contextMenuTarget.value.data
+
+  if (type === 'vertex') {
+    // 编辑节点
+    const raw = data.rawData || {}
+    editForm.vid = (raw.vid || data.id).toString()
+    editForm.vType = raw.v_type || data.category || ''
+    editForm.balance = (raw.balance !== undefined ? raw.balance : data.value).toString()
+    
+    // 保存原始数据
+    originalEditData.value = {
+      vType: editForm.vType,
+      balance: editForm.balance
+    }
+  } else if (type === 'edge') {
+    // 编辑边
+    const raw = data.rawData || {}
+    editForm.eid = (raw.eid || '').toString()
+    editForm.srcVid = (raw.src_vid || data.source || '').toString()
+    editForm.dstVid = (raw.dst_vid || data.target || '').toString()
+    editForm.eType = raw.e_type || data.label || ''
+    editForm.amount = (raw.amount !== undefined ? raw.amount : data.value || '').toString()
+    // 将时间戳转换为毫秒（如果是秒级时间戳）
+    const timestamp = raw.occur_time || 0
+    editForm.occurTime = timestamp ? (timestamp < 10000000000 ? timestamp * 1000 : timestamp) : null
+    
+    // 保存原始数据
+    originalEditData.value = {
+      eType: editForm.eType,
+      amount: editForm.amount,
+      occurTime: editForm.occurTime
+    }
+  }
+
+  hideContextMenu()
+  editDialogVisible.value = true
+}
+
+// 重置编辑表单
+const resetEditForm = () => {
+  editForm.vid = ''
+  editForm.vType = ''
+  editForm.balance = ''
+  editForm.eid = ''
+  editForm.srcVid = ''
+  editForm.dstVid = ''
+  editForm.eType = ''
+  editForm.amount = ''
+  editForm.occurTime = null
+  originalEditData.value = null
+}
+
+// 处理更新操作
+const handleUpdate = async () => {
+  if (editType.value === 'vertex') {
+    await updateVertex()
+  } else if (editType.value === 'edge') {
+    await updateEdge()
+  }
+}
+
+// 更新节点
+const updateVertex = async () => {
+  const vid = editForm.vid
+  if (!vid) {
+    ElMessage.warning('点ID不能为空')
+    return
+  }
+
+  // 检测哪些字段被修改了
+  const changes = []
+  const command = ['update', 'vertex', '--vid', vid]
+
+  if (editForm.vType !== originalEditData.value.vType && editForm.vType.trim()) {
+    command.push('--vt', editForm.vType.trim())
+    changes.push('点类型')
+  }
+
+  if (editForm.balance !== originalEditData.value.balance && editForm.balance.trim()) {
+    const balance = parseFloat(editForm.balance)
+    if (isNaN(balance) || balance < 0) {
+      ElMessage.warning('余额必须是非负数')
+      return
+    }
+    command.push('--bal', balance.toString())
+    changes.push('余额')
+  }
+
+  if (changes.length === 0) {
+    ElMessage.info('没有检测到任何修改')
+    return
+  }
+
+  loading.value = true
+  try {
+    console.log('执行更新命令:', command)
+    const response = await executeCommand(command)
+    console.log('更新响应:', response)
+
+    if (response.status === 'success') {
+      ElMessage.success(`节点更新成功，已更新: ${changes.join('、')}`)
+      editDialogVisible.value = false
+      resetEditForm()
+
+      // 刷新当前视图
+      if (activeTab.value === 'fullGraph') {
+        await queryFullGraph()
+      } else if (activeTab.value === 'vertex') {
+        await queryVertex()
+      } else if (activeTab.value === 'edge') {
+        await queryEdge()
+      } else if (activeTab.value === 'cycle' && cycleList.value.length > 0) {
+        await queryCycle()
+      }
+    } else {
+      ElMessage.error('更新失败: ' + (response.message || '未知错误'))
+    }
+  } catch (error) {
+    console.error('更新节点错误:', error)
+    ElMessage.error('更新失败: ' + (error.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
+}
+
+// 更新边
+const updateEdge = async () => {
+  const eid = editForm.eid
+  if (!eid) {
+    ElMessage.warning('边ID不能为空')
+    return
+  }
+
+  // 检测哪些字段被修改了
+  const changes = []
+  const command = ['update', 'edge', '--eid', eid]
+
+  if (editForm.eType !== originalEditData.value.eType && editForm.eType.trim()) {
+    command.push('--et', editForm.eType.trim())
+    changes.push('边类型')
+  }
+
+  if (editForm.amount !== originalEditData.value.amount && editForm.amount.trim()) {
+    const amount = parseFloat(editForm.amount)
+    if (isNaN(amount) || amount < 0) {
+      ElMessage.warning('金额必须是非负数')
+      return
+    }
+    command.push('--amt', amount.toString())
+    changes.push('金额')
+  }
+
+  if (editForm.occurTime !== originalEditData.value.occurTime && editForm.occurTime) {
+    // 将毫秒时间戳转换为秒级时间戳
+    const timestamp = Math.floor(editForm.occurTime / 1000)
+    command.push('--time', timestamp.toString())
+    changes.push('发生时间')
+  }
+
+  if (changes.length === 0) {
+    ElMessage.info('没有检测到任何修改')
+    return
+  }
+
+  loading.value = true
+  try {
+    console.log('执行更新命令:', command)
+    const response = await executeCommand(command)
+    console.log('更新响应:', response)
+
+    if (response.status === 'success') {
+      ElMessage.success(`边更新成功，已更新: ${changes.join('、')}`)
+      editDialogVisible.value = false
+      resetEditForm()
+
+      // 刷新当前视图
+      if (activeTab.value === 'fullGraph') {
+        await queryFullGraph()
+      } else if (activeTab.value === 'edge') {
+        await queryEdge()
+      } else if (activeTab.value === 'vertex') {
+        await queryVertex()
+      } else if (activeTab.value === 'cycle' && cycleList.value.length > 0) {
+        await queryCycle()
+      }
+    } else {
+      ElMessage.error('更新失败: ' + (response.message || '未知错误'))
+    }
+  } catch (error) {
+    console.error('更新边错误:', error)
+    ElMessage.error('更新失败: ' + (error.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
+}
+
 // 快速插入节点
 const quickInsertNode = async () => {
   if (!quickInsertVertexForm.vType || !quickInsertVertexForm.vType.trim()) {
@@ -1833,19 +2124,58 @@ onUnmounted(() => {
 <style scoped>
 .graph-query {
   padding: 20px;
-  min-height: calc(100vh - 140px);
+  height: calc(100vh - 140px);
+  overflow: hidden;
+}
+
+.graph-query :deep(.el-row) {
+  height: 100%;
+}
+
+.graph-query :deep(.el-col) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .operation-panel {
-  margin-bottom: 20px;
   border-radius: 12px;
-  max-height: calc(100vh - 160px);
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.operation-panel :deep(.el-card) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.operation-panel :deep(.el-card__body) {
+  flex: 1;
   overflow-y: auto;
 }
 
 .visualization-panel {
   border-radius: 12px;
-  height: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.visualization-panel :deep(.el-card) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.visualization-panel :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
 }
 
 .result-stats {
@@ -1917,22 +2247,23 @@ onUnmounted(() => {
 
 .chart-container {
   width: 100%;
-  height: 600px;
-  min-height: 400px;
+  flex: 1;
+  min-height: 500px;
 }
 
 .empty-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: calc(100vh - 300px);
-  min-height: 500px;
+  flex: 1;
+  min-height: 400px;
 }
 
 .cycle-list {
-  margin-top: 20px;
-  max-height: 300px;
+  margin-top: 10px;
+  max-height: 150px;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .cycle-title {

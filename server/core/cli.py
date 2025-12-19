@@ -18,6 +18,8 @@ from server.core.graph_service import (
     query_cycles,
     delete_vertex,
     delete_edge,
+    update_vertex,
+    update_edge,
 )
 
 
@@ -205,6 +207,35 @@ def handle_delete_edge(args) -> Dict[str, Any]:
         return {"status": "error", "message": "User not authenticated"}
     
     return delete_edge(username=username, eid=args.eid)
+
+
+def handle_update_vertex(args) -> Dict[str, Any]:
+    """处理更新点命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
+    return update_vertex(
+        username=username,
+        vid=args.vid,
+        v_type=args.v_type,
+        balance=args.balance,
+    )
+
+
+def handle_update_edge(args) -> Dict[str, Any]:
+    """处理更新边命令"""
+    username = getattr(args, 'username_context', None)
+    if not username:
+        return {"status": "error", "message": "User not authenticated"}
+    
+    return update_edge(
+        username=username,
+        eid=args.eid,
+        amount=args.amount,
+        occur_time=args.occur_time,
+        e_type=args.e_type,
+    )
 
 
 # ==================== 命令定义 ====================
@@ -546,6 +577,72 @@ def get_command_tree() -> List[Command]:
                         )
                     ],
                     handler=handle_delete_edge,
+                ),
+            ],
+        ),
+        # ==================== 更新命令 ====================
+        Command(
+            name="update",
+            aliases=["u"],
+            help="更新数据",
+            subcommands=[
+                Command(
+                    name="vertex",
+                    aliases=["v"],
+                    help="更新点",
+                    arguments=[
+                        Argument(
+                            flags=["--vid"],
+                            help="要更新的点 ID",
+                            required=True,
+                            type=int,
+                        ),
+                        Argument(
+                            flags=["--vt", "--v-type"],
+                            help="新的点类型",
+                            type=str,
+                            dest="v_type",
+                        ),
+                        Argument(
+                            flags=["--bal", "--balance"],
+                            help="新的余额",
+                            type=int,
+                            dest="balance",
+                        ),
+                    ],
+                    handler=handle_update_vertex,
+                ),
+                Command(
+                    name="edge",
+                    aliases=["e"],
+                    help="更新边",
+                    arguments=[
+                        Argument(
+                            flags=["--eid"],
+                            help="要更新的边 ID",
+                            required=True,
+                            type=int,
+                        ),
+                        Argument(
+                            flags=["--amt", "--amount"],
+                            help="新的交易金额",
+                            type=int,
+                            dest="amount",
+                        ),
+                        Argument(
+                            flags=["--time", "--occur-time"],
+                            help="新的发生时间 (Unix 时间戳)",
+                            type=int,
+                            dest="occur_time",
+                        ),
+                        Argument(
+                            flags=["--et", "--e-type"],
+                            help="新的边类型",
+                            type=str,
+                            dest="e_type",
+                        ),
+                    ],
+                    handler=handle_update_edge,
                 ),
             ],
         ),

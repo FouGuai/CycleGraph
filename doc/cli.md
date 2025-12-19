@@ -440,9 +440,9 @@ cgql query cycle --start 12345 --depth 10 --dir forward \
 
 ---
 
-## 4. DML
+## 4. DML 操作
 
-所有插入操作都需要先完成登录和连接。
+所有数据修改操作都需要先完成登录和连接。
 
 ### 4.1 插入点 (`insert vertex`)
 
@@ -643,6 +643,151 @@ cgql delete edge --eid 8888
 
 ---
 
+### 4.5 更新点 (`update vertex`)
+
+更新现有点的属性。支持部分更新，只更新提供的字段。
+
+**语法:**
+```bash
+cgql update vertex --vid <id> [选项]
+```
+
+**参数:**
+- `--vid <int>`: 要更新的点ID (必需)
+- `--vt, --v-type <str>`: 新的点类型 (可选)
+- `--bal, --balance <int>`: 新的余额 (可选)
+
+**注意:** 至少需要提供一个要更新的字段。
+
+**示例 1: 只更新余额**
+```bash
+cgql update vertex --vid 12345 --bal 600000
+```
+
+**示例 2: 只更新类型**
+```bash
+cgql update vertex --vid 12345 --vt company
+```
+
+**示例 3: 同时更新多个字段**
+```bash
+cgql update vertex --vid 12345 --vt account --bal 750000
+```
+
+**成功响应:**
+```json
+{
+  "status": "success",
+  "message": "Vertex 12345 updated successfully.",
+  "data": {
+    "vid": 12345,
+    "v_type": "account",
+    "create_time": 1672531200,
+    "balance": 750000
+  }
+}
+```
+
+**错误响应 (点不存在):**
+```json
+{
+  "status": "error",
+  "message": "Vertex 12345 does not exist"
+}
+```
+
+**错误响应 (未提供字段):**
+```json
+{
+  "status": "error",
+  "message": "At least one field must be provided for update"
+}
+```
+
+**错误响应 (余额无效):**
+```json
+{
+  "status": "error",
+  "message": "Balance must be a non-negative integer"
+}
+```
+
+---
+
+### 4.6 更新边 (`update edge`)
+
+更新现有边的属性。支持部分更新，只更新提供的字段。
+
+**语法:**
+```bash
+cgql update edge --eid <id> [选项]
+```
+
+**参数:**
+- `--eid <int>`: 要更新的边ID (必需)
+- `--amt, --amount <int>`: 新的交易金额 (可选)
+- `--time, --occur-time <int>`: 新的发生时间 Unix时间戳 (可选)
+- `--et, --e-type <str>`: 新的边类型 (可选)
+
+**注意:** 至少需要提供一个要更新的字段。
+
+**示例 1: 只更新金额**
+```bash
+cgql update edge --eid 8888 --amt 35000
+```
+
+**示例 2: 更新类型和时间**
+```bash
+cgql update edge --eid 8888 --et payment --time 1678885000
+```
+
+**示例 3: 同时更新所有字段**
+```bash
+cgql update edge --eid 8888 --amt 40000 --et transfer --time 1678890000
+```
+
+**成功响应:**
+```json
+{
+  "status": "success",
+  "message": "Edge 8888 updated successfully.",
+  "data": {
+    "eid": 8888,
+    "src_vid": 12345,
+    "dst_vid": 54321,
+    "amount": 40000,
+    "occur_time": 1678890000,
+    "e_type": "transfer"
+  }
+}
+```
+
+**错误响应 (边不存在):**
+```json
+{
+  "status": "error",
+  "message": "Edge 8888 does not exist"
+}
+```
+
+**错误响应 (未提供字段):**
+```json
+{
+  "status": "error",
+  "message": "At least one field must be provided for update"
+}
+```
+
+**错误响应 (金额无效):**
+```json
+{
+  "status": "error",
+  "message": "Amount must be a non-negative integer"
+}
+```
+
+---
+
 ## 5. 错误处理
 
 ### 5.1 通用错误
@@ -767,7 +912,19 @@ cgql delete edge --eid 8888
    cgql query cycle --start 1001 --depth 5
    ```
 
-6. **登出**
+6. **更新数据**
+   ```bash
+   cgql update vertex --vid 1001 --bal 150000
+   cgql update edge --eid 2001 --amt 60000
+   ```
+
+7. **删除数据**
+   ```bash
+   cgql delete edge --eid 2001
+   cgql delete vertex --vid 1002
+   ```
+
+8. **登出**
    ```bash
    cgql logout
    ```
@@ -778,6 +935,9 @@ cgql delete edge --eid 8888
 
 | 命令 | 简写 | 说明 |
 |------|------|------|
+| `update vertex` | `u v` | 更新点 |
+| `update edge` | `u e` | 更新边 |
+
 | `register -u <user> -p <pass>` | - | 注册用户 |
 | `login -u <user> -p <pass>` | - | 登录 |
 | `logout` | - | 登出 |
@@ -816,13 +976,16 @@ cgql delete edge --eid 8888
 | `--allow-duplicate-edges` | `--allow-dup-e` | 允许重复边 |
 
 ---
-
-## 8. 注意事项
-
-1. **执行顺序:** 必须先 `register/login` → `connect` → 才能执行查询/插入操作
+/更新/删除操作
 2. **时间格式:** 所有时间参数使用 Unix 时间戳 (秒级)
 3. **类型参数:** 点类型和边类型支持多个值,用空格分隔
 4. **ID生成:** 点ID可以自动生成,边ID必须手动指定
+5. **环路查询:** 默认要求时间递增,使用 `--dir any` 可忽略时序
+6. **性能考虑:** 环路查询深度建议不超过 10,使用 `--limit` 控制返回数量
+7. **会话管理:** 令牌保存在本地,使用 `logout` 清除
+8. **部分更新:** 更新操作支持只更新部分字段,未提供的字段保持不变
+9. **不可更新字段:** 点ID(vid)、边ID(eid)、创建时间(create_time)、源点/目标点(src_vid/dst_vid)不能更新
+10. **删除级联:** 删除点会同时删除所有相关的边
 5. **环路查询:** 默认要求时间递增,使用 `--dir any` 可忽略时序
 6. **性能考虑:** 环路查询深度建议不超过 10,使用 `--limit` 控制返回数量
 7. **会话管理:** 令牌保存在本地,使用 `logout` 清除
@@ -841,7 +1004,16 @@ A: 减小 `--depth` 参数,或添加更多过滤条件减少搜索空间。
 A: 所有错误都会在 `message` 字段中返回详细描述。
 
 **Q: 可以在脚本中使用吗?**
-A: 可以,所有命令都返回 JSON 格式,便于解析。
+A: 可以,所有命令都返回 J
+
+**Q: 更新操作可以只更新一个字段吗?**
+A: 可以,更新操作支持部分更新,只需提供要更新的字段即可。
+
+**Q: 可以更新点或边的ID吗?**
+A: 不可以,ID是主键不能修改。如需更改ID,请删除后重新插入。
+
+**Q: 更新边时可以修改源点或目标点吗?**
+A: 不可以,边的关系(src_vid/dst_vid)不能修改。如需更改关系,请删除后重新创建。SON 格式,便于解析。
 
 **Q: 令牌会过期吗?**
 A: 会,过期后需要重新登录。
