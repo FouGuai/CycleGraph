@@ -32,7 +32,7 @@ router.beforeEach((to, from, next) => {
   // 如果路由需要认证
   if (to.meta.requiresAuth) {
     // 检查cookie中是否有token
-    const hasToken = true
+    const hasToken = !!localStorage.getItem('token')
 
     if (!hasToken) {
       // 未登录，跳转到登录页

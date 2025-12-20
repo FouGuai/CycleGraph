@@ -176,6 +176,7 @@ const handleLogin = async () => {
                 // 只保存用户名到 localStorage
                 // Token 由后端通过 Set-Cookie header 自动设置
                 localStorage.setItem('username', loginForm.username)
+                localStorage.setItem("token", response.token)
 
                 console.log('Token saved by backend, redirecting to /query')
 
