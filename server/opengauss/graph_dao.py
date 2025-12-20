@@ -153,7 +153,6 @@ def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> i
     """
     start = time.perf_counter()
     conn = None
-    conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()
@@ -169,6 +168,42 @@ def execute_dml(sql: str, params: Optional[Tuple] = None, **db_kwargs: Any) -> i
         if conn:
             conn.rollback()
         raise Exception(f"执行 DML 失败: {sql[:100]}... | 错误: {e}") from e
+    finally:
+        if conn:
+            conn.close()
+
+
+def execute_multi(sql_params_list: List[Tuple[str, Optional[Tuple]]], **db_kwargs: Any) -> int:
+    """在同一事务中执行多个 DML 语句。
+
+    Args:
+        sql_params_list: SQL 语句和参数的列表，每项为 (sql, params) 元组
+        **db_kwargs: 数据库连接参数
+
+    Returns:
+        int: 总共受影响的行数
+    """
+    start = time.perf_counter()
+    conn = None
+    try:
+        conn = connect(**db_kwargs)
+        cur = conn.cursor()
+        total_rows = 0
+        
+        for sql, params in sql_params_list:
+            cur.execute(sql, params)
+            total_rows += cur.rowcount
+        
+        conn.commit()
+        cur.close()
+        end = time.perf_counter()
+
+        print(f"execute_multi elapsed: {(end - start)*1000:.2f} ms")
+        return total_rows
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"执行多个 DML 失败 | 错误: {e}") from e
     finally:
         if conn:
             conn.close()
@@ -221,7 +256,6 @@ def fetch_one(
         Optional[Tuple]: 查询结果的第一行，若无结果返回 None
     """
     start = time.perf_counter()
-    conn = None
     conn = None
     try:
         conn = connect(**db_kwargs)
