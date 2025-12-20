@@ -224,7 +224,6 @@ def fetch_all(
     """
     start = time.perf_counter()
     conn = None
-    conn = None
     try:
         conn = connect(**db_kwargs)
         cur = conn.cursor()

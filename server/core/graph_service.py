@@ -118,9 +118,6 @@ def insert_vertex(
             if existing:
                 return {"status": "error", "message": f"Vertex {vid} already exists"}
 
-        if balance < 0:
-            return {"status": "error", "message": "Balance must be non-negative"}
-
         if create_time is not None and create_time <= 0:
             return {
                 "status": "error",

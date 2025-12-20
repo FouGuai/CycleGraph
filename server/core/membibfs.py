@@ -43,8 +43,6 @@ def query_cycles(
         edge_filter_min_amount: 边最小金额过滤
         edge_filter_max_amount: 边最大金额过滤
         limit: 最多返回的环数量
-        allow_duplicate_vertices: 是否允许环中出现重复点(除起点外)
-        allow_duplicate_edges: 是否允许环中出现重复边
         **db_kwargs: 数据库连接参数
 
     Returns:
@@ -158,7 +156,7 @@ def _load_graph_data(
     vertex_rows = fetch_all(
         vertex_sql, tuple(vertex_params) if vertex_params else None, **db_kwargs
     )
-    vertices_map = {row[0]: Vertex.from_tuple(row) for row in vertex_rows}
+    vertices_map = {row[0]: Vertex.from_tuple(row) for row in vertex_rows} # vid -> Vertex
 
     # 2. 加载边数据
     edge_conditions = []
@@ -241,7 +239,7 @@ def _memory_bidirectional_bfs(
     seen_cycles = set()  # 存储已见环路的签名
     current_depth = 1
 
-    while current_depth <= max_depth // 2 and len(cycles) < limit:
+    while current_depth <= max_depth and len(cycles) < limit:
         # 正向扩展
         new_fwd_frontier = _expand_forward_memory(
             fwd_frontier,
@@ -301,6 +299,9 @@ def _memory_bidirectional_bfs(
         )
         cycles.extend(new_cycles)
 
+        if len(cycles) >= limit:
+            break
+
         current_depth += 1
 
     return cycles, seen_cycles
@@ -336,13 +337,13 @@ def _expand_forward_memory(
             if edge.dst_vid in path_vids:
                 continue
 
-            # 添加到新状态，保存完整Edge对象
-            new_path_vids = path_vids + [edge.dst_vid]
-            new_path_edges = path_edges + [edge]
-
             # 如果该点已经在这一层被访问过,跳过(保留第一次访问的路径)
             if edge.dst_vid in state and state[edge.dst_vid][2] == target_depth:
                 continue
+
+            # 添加到新状态，保存完整Edge对象
+            new_path_vids = path_vids + [edge.dst_vid]
+            new_path_edges = path_edges + [edge]
 
             state[edge.dst_vid] = (
                 vid,
@@ -487,21 +488,6 @@ def _validate_cycle(
     if cycle[-1][1] != start_vid:
         return False
 
-    # 检查重复点
-    if not allow_duplicate_vertices:
-        vertices = [start_vid]
-        for src, dst, _, _ in cycle:
-            if dst != start_vid and dst in vertices:
-                return False
-            vertices.append(dst)
-
-    # 检查重复边
-    if not allow_duplicate_edges:
-        edges = set()
-        for _, _, eid, _ in cycle:
-            if eid in edges:
-                return False
-            edges.add(eid)
 
     return True
 
@@ -585,9 +571,8 @@ def _vertex_matches_filter(
 def _get_cycle_signature(cycle: List[Tuple[int, int, int, Edge]]) -> Tuple:
     """生成环路的唯一签名，用于去重。
 
-    同一个环路，无论从哪个点开始，正向还是反向遍历，都应该生成相同的签名。
+    同一个环路，无论从哪个点开始，都应该生成相同的签名。
     例如: 1->2->3->1, 2->3->1->2, 3->1->2->3 是同一个环
-          1->2->3->1 和 1->3->2->1 也是同一个环（反向）
 
     Args:
         cycle: 环路，格式为 [(src_vid, dst_vid, eid, edge_obj), ...]
@@ -608,21 +593,5 @@ def _get_cycle_signature(cycle: List[Tuple[int, int, int, Edge]]) -> Tuple:
     # 从最小边ID开始的正向序列
     normalized_forward = tuple(edge_ids[min_idx:] + edge_ids[:min_idx])
 
-    # 从最小边ID开始的反向序列
-    # 反向时，从最小边ID位置开始，逆序遍历
-    reversed_sequence = edge_ids[: min_idx + 1][::-1] + edge_ids[min_idx + 1 :][::-1]
-    if reversed_sequence:
-        # 调整使得最小边ID在开头
-        rev_min_idx = reversed_sequence.index(min_eid)
-        normalized_reverse = tuple(
-            reversed_sequence[rev_min_idx:] + reversed_sequence[:rev_min_idx]
-        )
-    else:
-        normalized_reverse = tuple()
-
     # 返回字典序较小的那个作为唯一签名
-    return (
-        min(normalized_forward, normalized_reverse)
-        if normalized_reverse
-        else normalized_forward
-    )
+    return normalized_forward
